@@ -74,6 +74,12 @@ document:
 rag:
   top-k: 3  # 检索返回的最相似文档数量
   model: "qwen3-max"  # 大语言模型名称
+  recall-count: 30  # Milvus 初始召回数量（需大于 rerank.threshold）
+  rerank:
+    enabled: true  # 是否启用重排序
+    threshold: 10  # 召回数超过此值才触发重排序
+    top-k: 10  # 重排序后保留的文档数
+    model: "gte-rerank-v2"  # DashScope Rerank 模型
 
 # Prometheus 配置
 prometheus:
