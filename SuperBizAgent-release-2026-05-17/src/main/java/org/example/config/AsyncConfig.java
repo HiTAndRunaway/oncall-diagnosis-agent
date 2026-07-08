@@ -38,4 +38,27 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * 混合检索专用线程池
+     * 为双路并行召回（dense + sparse）提供线程资源
+     */
+    @Bean("searchExecutor")
+    public Executor searchExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(10);
+        executor.setKeepAliveSeconds(30);
+        executor.setThreadNamePrefix("search-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy() {
+            @Override
+            public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
+                logger.warn("检索线程池已满，降级为调用者线程执行");
+                super.rejectedExecution(r, e);
+            }
+        });
+        executor.initialize();
+        return executor;
+    }
 }
