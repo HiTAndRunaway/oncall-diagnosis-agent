@@ -1,105 +1,114 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+本文件为 Claude Code (claude.ai/code) 在此仓库中工作时提供指导。
 
-## Build & Run
+## 构建与运行
 
 ```bash
-# Set required environment variable
+# 设置必需的环境变量
 export DASHSCOPE_API_KEY=your-api-key
 
-# Build
+# 构建
 mvn clean install
 
-# Run
+# 运行
 mvn spring-boot:run
 
-# One-click init (starts Docker Milvus + app + uploads docs)
+# 一键初始化（启动 Docker Milvus + 应用 + 上传文档）
 make init
 
-# Docker only (Milvus + etcd + MinIO + Attu GUI at :8000)
+# 仅启动 Docker（Milvus + etcd + MinIO + Attu 管理界面，端口 :8000）
 make up
 
-# App only (background, logs to server.log)
+# 仅启动应用（后台运行，日志输出到 server.log）
 make start
 
-# Stop all
+# 停止所有服务
 make stop && make down
 ```
 
-The app serves on **port 9900**. Health check: `GET /milvus/health`.
+应用运行在 **端口 9900**。健康检查：`GET /milvus/health`。
 
-## Architecture
+## 架构
 
-This is a **Spring Boot 3.2 + Spring AI Alibaba Agent Framework** application with two core subsystems:
+这是一个基于 **Spring Boot 3.2 + Spring AI Alibaba Agent Framework** 的应用，包含两个核心子系统：
 
-### 1. RAG (Retrieval-Augmented Generation)
-**Pipeline**: file upload → document chunking → DashScope text-embedding-v4 → Milvus vector DB → similarity search → DashScope LLM answer generation.
+### 1. RAG（检索增强生成）
+**流水线**：文件上传 → 文档分块 → DashScope text-embedding-v4 → Milvus 向量数据库 → 相似度搜索 → DashScope LLM 生成答案。
 
-Key classes flow:
-- `FileUploadController` → `VectorIndexService.indexSingleFile()` → `DocumentChunkService` (splits by Markdown headings, max 800 chars, 100 overlap) → `VectorEmbeddingService` (DashScope API) → Milvus insert
-- Query: `InternalDocsTools.queryInternalDocs()` → `VectorSearchService.searchSimilarDocuments()` (L2 metric) → returns top-K results as JSON to the Agent
-- `RagService` can also be used standalone for streaming RAG answers (uses `qwen3-max` model by default)
+关键类流程：
+- `FileUploadController` → `VectorIndexService.indexSingleFile()` → `DocumentChunkService`（按 Markdown 标题分割，最大 800 字符，100 字符重叠） → `VectorEmbeddingService`（DashScope API） → Milvus 插入
+- 查询：`InternalDocsTools.queryInternalDocs()` → `VectorSearchService.searchSimilarDocuments()`（使用 L2 距离度量） → 将 Top-K 结果以 JSON 形式返回给 Agent
+- `RagService` 也可单独用于流式 RAG 回答（默认使用 `qwen3-max` 模型）
 
-### 2. AIOps Multi-Agent System
-Uses Spring AI Alibaba's **SupervisorAgent** to orchestrate a **Planner-Executor-Replanner** loop:
+### 2. AIOps 多智能体系统
+使用 Spring AI Alibaba 的 **SupervisorAgent** 来编排 **Planner-Executor-Replanner** 循环：
 
-- **SupervisorAgent** (`ai_ops_supervisor`): top-level dispatcher, decides whether to call planner_agent or executor_agent
-- **Planner Agent** (`planner_agent`): decomposes alerts, outputs `{decision: PLAN|EXECUTE|FINISH, step, ...}`. When FINISH, outputs a complete Markdown alert analysis report following a strict template (active alerts table → root cause analysis → remediation steps → conclusion)
-- **Executor Agent** (`executor_agent`): executes the first step from Planner's plan, calls tools, returns structured JSON feedback (`{status, summary, evidence, nextHint}`)
+- **SupervisorAgent**（`ai_ops_supervisor`）：顶层调度器，决定是调用 planner_agent 还是 executor_agent
+- **Planner Agent**（`planner_agent`）：分解告警，输出 `{decision: PLAN|EXECUTE|FINISH, step, ...}`。当输出 FINISH 时，按照严格的模板输出完整的 Markdown 告警分析报告（活跃告警表 → 根因分析 → 修复步骤 → 结论）
+- **Executor Agent**（`executor_agent`）：执行 Planner 计划中的第一个步骤，调用工具，返回结构化的 JSON 反馈（`{status, summary, evidence, nextHint}`）
 
-The loop runs until Planner outputs `decision=FINISH`. Entry point: `POST /api/ai_ops` → `AiOpsService.executeAiOpsAnalysis()`.
+循环持续进行，直到 Planner 输出 `decision=FINISH`。入口：`POST /api/ai_ops` → `AiOpsService.executeAiOpsAnalysis()`。
 
-### Agent Tools (`agent/tool/`)
+### Agent 工具 (`agent/tool/`)
 
-All tools are `@Component` with `@Tool` annotations, registered as method tools on `ReactAgent`:
+所有工具均为带有 `@Tool` 注解的 `@Component`，作为 `ReactAgent` 上的方法工具注册：
 
-| Tool | Method | Real/Mock |
-|------|--------|-----------|
-| `DateTimeTools` | `getCurrentDateTime()` | Always real |
-| `InternalDocsTools` | `queryInternalDocs(query)` | Real (Milvus search) |
-| `QueryMetricsTools` | `queryPrometheusAlerts()` | Real (Prometheus API) or Mock (`prometheus.mock-enabled`) |
-| `QueryLogsTools` | `queryLogs(region, logTopic, query, limit)`, `getAvailableLogTopics()` | Mock only (`cls.mock-enabled`); real mode expects MCP-injected tools |
+| 工具 | 方法 | 真实/模拟 |
+|------|------|----------|
+| `DateTimeTools` | `getCurrentDateTime()` | 始终真实 |
+| `InternalDocsTools` | `queryInternalDocs(query)` | 真实（Milvus 搜索） |
+| `QueryMetricsTools` | `queryPrometheusAlerts()` | 真实（Prometheus API）或模拟（`prometheus.mock-enabled`） |
+| `QueryLogsTools` | `queryLogs(region, logTopic, query, limit)`, `getAvailableLogTopics()` | 仅模拟模式（`cls.mock-enabled`）；真实模式期望通过 MCP 注入工具 |
 
-When `cls.mock-enabled=false`, `QueryLogsTools` is not registered as a bean — the real CLS log querying comes from MCP tools injected via `spring.ai.mcp.client.sse.connections.tencent-cls`.
+当 `cls.mock-enabled=false` 时，`QueryLogsTools` 不作为 bean 注册 —— 真实的 CLS 日志查询能力来自通过 `spring.ai.mcp.client.sse.connections.tencent-cls` 注入的 MCP 工具。
 
-### Chat Service
-`ChatService` is the shared factory for creating `ReactAgent` instances. It:
-1. Creates `DashScopeApi` + `DashScopeChatModel` (temperature 0.7, maxToken 2000, topP 0.9)
-2. Builds system prompt with conversation history (sliding window of max 6 message pairs)
-3. Dynamically builds the method tools array based on whether `QueryLogsTools` is available (`@Autowired(required = false)`)
-4. Merges MCP-provided tools via `ToolCallbackProvider`
+### 聊天服务
+`ChatService` 是创建 `ReactAgent` 实例的共享工厂。它：
+1. 创建 `DashScopeApi` + `DashScopeChatModel`（温度 0.7，maxToken 2000，topP 0.9）
+2. 构建包含对话历史的系统提示词（滑动窗口，最多 6 对消息）
+3. 根据 `QueryLogsTools` 是否可用（`@Autowired(required = false)`）动态构建方法工具数组
+4. 通过 `ToolCallbackProvider` 合并 MCP 提供的工具
 
-### Session Management
-`ChatController` maintains `ConcurrentHashMap<String, SessionInfo>` with `ReentrantLock` per session. History is a list of `{role, content}` maps, capped at 6 pairs (12 entries), with automatic oldest-pair eviction.
+### 会话管理
+`ChatController` 维护一个 `ConcurrentHashMap<String, SessionInfo>`，每个会话配有 `ReentrantLock`。历史记录为一个 `{role, content}` Map 列表，上限为 6 对（12 条记录），超出时自动淘汰最早的消息对。
 
-## Configuration
+## 配置
 
-- `application.yml` — main config (server port 9900, Milvus host:port, DashScope API key from env var, Prometheus URL, CLS mock toggle, RAG top-K/model, document chunk sizes)
-- `vector-database.yml` — Docker Compose for Milvus standalone + etcd + MinIO + Attu GUI
-- MCP SSE connection to Tencent CLS configured in `spring.ai.mcp.client.sse.connections.tencent-cls`
+- `application.yml` — 主配置文件（服务器端口 9900，Milvus 主机:端口，从环境变量读取 DashScope API 密钥，Prometheus URL，CLS 模拟开关，RAG top-K/模型，文档分块大小）
+- `vector-database.yml` — 用于 Milvus 独立部署 + etcd + MinIO + Attu 管理界面的 Docker Compose 文件
+- 到腾讯 CLS 的 MCP SSE 连接配置在 `spring.ai.mcp.client.sse.connections.tencent-cls`
 
-## Controllers
+## 控制器
 
-- `ChatController` (`/api`): `/chat`, `/chat_stream`, `/ai_ops`, `/chat/clear`, `/chat/session/{id}` — all chat/AIOps endpoints with SSE streaming support
-- `FileUploadController` (`/api/upload`): file upload with auto-vectorization
-- `MilvusCheckController` (`/milvus/health`): Milvus connectivity check
+- `ChatController` (`/api`)：`/chat`、`/chat_stream`、`/ai_ops`、`/chat/clear`、`/chat/session/{id}` — 所有聊天/AIOps 端点，支持 SSE 流式传输
+- `FileUploadController` (`/api/upload`)：文件上传并自动向量化
+- `MilvusCheckController` (`/milvus/health`)：Milvus 连接性检查
 
-## Frontend
+## 前端
 
-Single-page app in `src/main/resources/static/`:
-- `index.html` — Gemini-style UI with sidebar, chat area, mode selector (quick vs stream)
-- `app.js` — `SuperBizAgentApp` class: SSE parsing, Markdown rendering (marked.js + highlight.js), localStorage chat history, file upload with overlay
-- `styles.css` — Google Material-inspired design
+单页应用，位于 `src/main/resources/static/`：
+- `index.html` — Gemini 风格的界面，包含侧边栏、聊天区域、模式选择器（快速 vs 流式）
+- `app.js` — `SuperBizAgentApp` 类：SSE 解析、Markdown 渲染（marked.js + highlight.js）、localStorage 聊天历史、带遮罩层的文件上传
+- `styles.css` — 受 Google Material 启发的设计
 
 ## aiops-docs/
 
-Five Markdown files serving as the RAG knowledge base for alert handling procedures: `cpu_high_usage.md`, `memory_high_usage.md`, `disk_high_usage.md`, `service_unavailable.md`, `slow_response.md`. These are vectorized on `make upload` and searched by `InternalDocsTools` during AIOps analysis.
+五个 Markdown 文件，作为告警处理流程的 RAG 知识库：`cpu_high_usage.md`、`memory_high_usage.md`、`disk_high_usage.md`、`service_unavailable.md`、`slow_response.md`。这些文件在 `make upload` 时被向量化，在 AIOps 分析过程中由 `InternalDocsTools` 进行搜索。
 
-## Key Dependencies
+## 关键依赖
 
-- `spring-ai-alibaba-starter-dashscope` — DashScope chat/embedding
-- `spring-ai-alibaba-agent-framework` — ReactAgent, SupervisorAgent, multi-agent orchestration
-- `milvus-sdk-java` 2.6.10 — Milvus vector DB client
-- `dashscope-sdk-java` 2.17.0 — Alibaba Cloud DashScope (text embedding)
-- `spring-ai-starter-mcp-client-webflux` — MCP client for Tencent CLS integration
+- `spring-ai-alibaba-starter-dashscope` — DashScope 聊天/嵌入
+- `spring-ai-alibaba-agent-framework` — ReactAgent、SupervisorAgent、多智能体编排
+- `milvus-sdk-java` 2.6.10 — Milvus 向量数据库客户端
+- `dashscope-sdk-java` 2.17.0 — 阿里云 DashScope（文本嵌入）
+- `spring-ai-starter-mcp-client-webflux` — 用于腾讯 CLS 集成的 MCP 客户端
+
+## 注意事项
+
+1.每次用户要求输出方案之后，将方案保存到当前项目下的/session/idea文件夹中（如果没有该路径就创建路径）.
+
+2.每次代码实现完之后，需要进行测试，保证能够编译成功，运行无误。接着检查有没有上下文关系，性能问题。
+
+3.code review之后，生成本次改动的摘要（15字以内），然后提交并推送到远程分支（失败可以重试，重试5次，如果不成功就停止）
+
