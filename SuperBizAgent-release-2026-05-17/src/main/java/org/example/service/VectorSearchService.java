@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.SortedMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -121,21 +122,19 @@ public class VectorSearchService {
                         CompletableFuture.supplyAsync(
                                 () -> sparseSearch(query, fetchCount), searchExecutor);
 
-                // 3. 等待两路完成
-                CompletableFuture.allOf(denseFuture, sparseFuture).join();
-
-                // 4. 获取结果
+                // 3. 等待密集路完成（必须成功）
                 List<SearchResult> denseResults;
-                List<SearchResult> sparseResults;
                 try {
-                    denseResults = denseFuture.get();
+                    denseResults = denseFuture.get(30, TimeUnit.SECONDS);
                 } catch (Exception e) {
                     logger.error("向量检索路异常", e);
                     throw new RuntimeException("向量检索失败: " + e.getMessage(), e);
                 }
 
+                // 4. 等待稀疏路完成（可降级路径）
+                List<SearchResult> sparseResults;
                 try {
-                    sparseResults = sparseFuture.get();
+                    sparseResults = sparseFuture.get(30, TimeUnit.SECONDS);
                 } catch (Exception e) {
                     logger.warn("BM25 路异常，降级为单路向量: {}", e.getMessage());
                     sparseResults = Collections.emptyList();
