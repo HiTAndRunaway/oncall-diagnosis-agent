@@ -8,10 +8,12 @@ import io.milvus.param.dml.SearchParam;
 import io.milvus.response.SearchResultsWrapper;
 import lombok.Getter;
 import lombok.Setter;
+import org.example.config.MilvusProperties;
 import org.example.constant.MilvusConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -23,8 +25,12 @@ import org.springframework.web.client.RestTemplate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.SortedMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 /**
@@ -42,6 +48,13 @@ public class VectorSearchService {
     @Autowired
     private VectorEmbeddingService embeddingService;
 
+    @Autowired
+    @Qualifier("searchExecutor")
+    private Executor searchExecutor;
+
+    @Autowired
+    private MilvusProperties milvusProperties;
+
     // ===== 重排序配置 =====
     @Value("${rag.rerank.enabled:true}")
     private boolean rerankEnabled;
@@ -58,6 +71,19 @@ public class VectorSearchService {
     @Value("${rag.recall-count:30}")
     private int recallCount;
 
+    // ===== 双路召回配置 =====
+    @Value("${rag.hybrid.enabled:true}")
+    private boolean hybridEnabled;
+
+    @Value("${rag.hybrid.bm25-weight:1.0}")
+    private double bm25Weight;
+
+    @Value("${rag.hybrid.vector-weight:1.0}")
+    private double vectorWeight;
+
+    @Value("${rag.hybrid.rrf-k:60}")
+    private int rrfK;
+
     @Value("${dashscope.api.key}")
     private String dashscopeApiKey;
 
@@ -68,61 +94,70 @@ public class VectorSearchService {
             "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank";
 
     /**
-     * 搜索相似文档
-     * 
+     * 搜索相似文档（支持双路并行召回 + RRF 融合）
+     *
      * @param query 查询文本
-     * @param topK 返回最相似的K个结果
+     * @param topK  返回最相似的K个结果
      * @return 搜索结果列表
      */
     public List<SearchResult> searchSimilarDocuments(String query, int topK) {
         try {
-            // 开启重排序时用 recallCount 召回更多候选，否则直接用 topK
             int fetchCount = rerankEnabled ? recallCount : topK;
-            logger.info("开始搜索相似文档, 查询: {}, fetchCount: {}, rerankEnabled: {}", query, fetchCount, rerankEnabled);
+            logger.info("开始搜索相似文档, query: {}, fetchCount: {}, hybridEnabled: {}",
+                    query, fetchCount, hybridEnabled);
 
-            // 1. 将查询文本向量化
-            List<Float> queryVector = embeddingService.generateQueryVector(query);
-            logger.debug("查询向量生成成功, 维度: {}", queryVector.size());
+            List<SearchResult> results;
 
-            // 2. 构建搜索参数
-            SearchParam searchParam = SearchParam.newBuilder()
-                    .withCollectionName(MilvusConstants.MILVUS_COLLECTION_NAME)
-                    .withVectorFieldName("vector")
-                    .withVectors(Collections.singletonList(queryVector))
-                    .withTopK(fetchCount)
-                    .withMetricType(io.milvus.param.MetricType.L2)
-                    .withOutFields(List.of("id", "content", "metadata"))
-                    .withParams("{\"nprobe\":10}")
-                    .build();
+            if (hybridEnabled) {
+                // === 双路并行召回 ===
 
-            // 3. 执行搜索
-            R<SearchResults> searchResponse = milvusClient.search(searchParam);
+                // 1. 异步执行向量检索
+                CompletableFuture<List<SearchResult>> denseFuture =
+                        CompletableFuture.supplyAsync(
+                                () -> denseSearch(query, fetchCount), searchExecutor);
 
-            if (searchResponse.getStatus() != 0) {
-                throw new RuntimeException("向量搜索失败: " + searchResponse.getMessage());
-            }
+                // 2. 异步执行 BM25 稀疏检索
+                CompletableFuture<List<SearchResult>> sparseFuture =
+                        CompletableFuture.supplyAsync(
+                                () -> sparseSearch(query, fetchCount), searchExecutor);
 
-            // 4. 解析搜索结果
-            SearchResultsWrapper wrapper = new SearchResultsWrapper(searchResponse.getData().getResults());
-            List<SearchResult> results = new ArrayList<>();
+                // 3. 等待两路完成
+                CompletableFuture.allOf(denseFuture, sparseFuture).join();
 
-            for (int i = 0; i < wrapper.getRowRecords(0).size(); i++) {
-                SearchResult result = new SearchResult();
-                result.setId((String) wrapper.getIDScore(0).get(i).get("id"));
-                result.setContent((String) wrapper.getFieldData("content", 0).get(i));
-                result.setScore(wrapper.getIDScore(0).get(i).getScore());
-
-                Object metadataObj = wrapper.getFieldData("metadata", 0).get(i);
-                if (metadataObj != null) {
-                    result.setMetadata(metadataObj.toString());
+                // 4. 获取结果
+                List<SearchResult> denseResults;
+                List<SearchResult> sparseResults;
+                try {
+                    denseResults = denseFuture.get();
+                } catch (Exception e) {
+                    logger.error("向量检索路异常", e);
+                    throw new RuntimeException("向量检索失败: " + e.getMessage(), e);
                 }
 
-                results.add(result);
+                try {
+                    sparseResults = sparseFuture.get();
+                } catch (Exception e) {
+                    logger.warn("BM25 路异常，降级为单路向量: {}", e.getMessage());
+                    sparseResults = Collections.emptyList();
+                }
+
+                // 5. 判断是否需要 RRF 融合
+                if (sparseResults.isEmpty()) {
+                    logger.info("BM25 路无结果，直接使用向量路");
+                    results = denseResults;
+                } else {
+                    // 6. RRF 融合
+                    results = rrfFusion(denseResults, sparseResults, fetchCount);
+                }
+
+            } else {
+                // === 单路向量召回（原有逻辑） ===
+                results = denseSearch(query, fetchCount);
             }
 
-            logger.info("Milvus 召回 {} 个相似文档", results.size());
+            logger.info("召回 {} 个候选文档", results.size());
 
-            // 5. 重排序判断
+            // 7. 重排序（现有逻辑不变）
             if (rerankEnabled && results.size() > rerankThreshold) {
                 results = rerank(query, results);
             } else if (results.size() > topK) {
@@ -139,6 +174,250 @@ public class VectorSearchService {
             logger.error("搜索相似文档失败", e);
             throw new RuntimeException("搜索失败: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 向量路检索（Dense Vector Search）
+     * 提取自原有 searchSimilarDocuments 中的向量检索部分
+     *
+     * @param query 查询文本
+     * @param topK  返回数量
+     * @return 向量检索结果
+     */
+    private List<SearchResult> denseSearch(String query, int topK) {
+        logger.debug("开始向量检索, query: {}, topK: {}", query, topK);
+
+        // 1. 将查询文本向量化
+        List<Float> queryVector = embeddingService.generateQueryVector(query);
+        logger.debug("查询向量生成成功, 维度: {}", queryVector.size());
+
+        // 2. 构建搜索参数
+        SearchParam searchParam = SearchParam.newBuilder()
+                .withCollectionName(MilvusConstants.MILVUS_COLLECTION_NAME)
+                .withVectorFieldName("vector")
+                .withVectors(Collections.singletonList(queryVector))
+                .withTopK(topK)
+                .withMetricType(io.milvus.param.MetricType.L2)
+                .withOutFields(List.of("id", "content", "metadata"))
+                .withParams("{\"nprobe\":10}")
+                .build();
+
+        // 3. 执行搜索
+        R<SearchResults> searchResponse = milvusClient.search(searchParam);
+
+        if (searchResponse.getStatus() != 0) {
+            throw new RuntimeException("向量搜索失败: " + searchResponse.getMessage());
+        }
+
+        // 4. 解析搜索结果
+        SearchResultsWrapper wrapper = new SearchResultsWrapper(searchResponse.getData().getResults());
+        List<SearchResult> results = new ArrayList<>();
+
+        for (int i = 0; i < wrapper.getRowRecords(0).size(); i++) {
+            SearchResult result = new SearchResult();
+            result.setId((String) wrapper.getIDScore(0).get(i).get("id"));
+            result.setContent((String) wrapper.getFieldData("content", 0).get(i));
+            result.setScore(wrapper.getIDScore(0).get(i).getScore());
+
+            Object metadataObj = wrapper.getFieldData("metadata", 0).get(i);
+            if (metadataObj != null) {
+                result.setMetadata(metadataObj.toString());
+            }
+
+            results.add(result);
+        }
+
+        logger.info("向量检索召回 {} 个文档", results.size());
+        return results;
+    }
+
+    /**
+     * BM25 稀疏向量检索
+     * 通过 Milvus REST API 将 query 文本转为 sparse vector 后检索
+     *
+     * @param query 查询文本
+     * @param topK  返回数量
+     * @return BM25 检索结果
+     */
+    private List<SearchResult> sparseSearch(String query, int topK) {
+        try {
+            logger.info("开始 BM25 稀疏检索, query: {}, topK: {}", query, topK);
+
+            // 1. 调用 Milvus analyzer 将 query 转为 sparse vector
+            SortedMap<Long, Float> querySparseVector = tokenizeQuery(query);
+            if (querySparseVector.isEmpty()) {
+                logger.warn("查询文本分词后为空 sparse vector，返回空结果");
+                return Collections.emptyList();
+            }
+            logger.debug("查询稀疏向量维度: {}", querySparseVector.size());
+
+            // 2. 构建搜索参数
+            List<SortedMap<Long, Float>> queryVectors = Collections.singletonList(querySparseVector);
+            SearchParam searchParam = SearchParam.newBuilder()
+                    .withCollectionName(MilvusConstants.MILVUS_COLLECTION_NAME)
+                    .withVectorFieldName(MilvusConstants.SPARSE_VECTOR_FIELD)
+                    .withVectors(queryVectors)
+                    .withTopK(topK)
+                    .withMetricType(io.milvus.param.MetricType.IP)
+                    .withOutFields(List.of("id", "content", "metadata"))
+                    .withConsistencyLevel(io.milvus.common.clientenum.ConsistencyLevelEnum.BOUNDED)
+                    .build();
+
+            // 3. 执行搜索
+            R<SearchResults> searchResponse = milvusClient.search(searchParam);
+
+            if (searchResponse.getStatus() != 0) {
+                throw new RuntimeException("BM25 稀疏搜索失败: " + searchResponse.getMessage());
+            }
+
+            // 4. 解析结果
+            SearchResultsWrapper wrapper = new SearchResultsWrapper(searchResponse.getData().getResults());
+            List<SearchResult> results = new ArrayList<>();
+
+            for (int i = 0; i < wrapper.getRowRecords(0).size(); i++) {
+                SearchResult result = new SearchResult();
+                result.setId((String) wrapper.getIDScore(0).get(i).get("id"));
+                result.setContent((String) wrapper.getFieldData("content", 0).get(i));
+                result.setScore(wrapper.getIDScore(0).get(i).getScore());
+
+                Object metadataObj = wrapper.getFieldData("metadata", 0).get(i);
+                if (metadataObj != null) {
+                    result.setMetadata(metadataObj.toString());
+                }
+                results.add(result);
+            }
+
+            logger.info("BM25 稀疏召回 {} 个文档", results.size());
+            return results;
+
+        } catch (Exception e) {
+            logger.warn("BM25 稀疏检索失败，返回空结果: {}", e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * 调用 Milvus REST API 将查询文本分词并转为稀疏向量
+     *
+     * @param query 查询文本
+     * @return SortedMap<维度索引, BM25权重> 形式的稀疏向量
+     */
+    private SortedMap<Long, Float> tokenizeQuery(String query) {
+        // Milvus 2.4+ RESTful API 端口为 9091（独立于 gRPC 端口 19530）
+        String analyzerUrl = String.format("http://%s:%d/v2/analyzers/%s/tokens",
+                milvusProperties.getHost(), 9091,
+                MilvusConstants.ANALYZER_NAME);
+
+        // 构建请求体
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("text", query);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        if (milvusProperties.getUsername() != null
+                && !milvusProperties.getUsername().isEmpty()) {
+            String auth = milvusProperties.getUsername() + ":"
+                    + milvusProperties.getPassword();
+            headers.setBasicAuth(
+                    java.util.Base64.getEncoder().encodeToString(auth.getBytes()));
+        }
+
+        HttpEntity<Map<String, Object>> request =
+                new HttpEntity<>(requestBody, headers);
+
+        try {
+            ResponseEntity<Map> response =
+                    restTemplate.postForEntity(analyzerUrl, request, Map.class);
+
+            if (response.getBody() == null) {
+                logger.warn("分词 API 返回空响应");
+                return Collections.emptySortedMap();
+            }
+
+            // 解析分词结果: {"data": [{"token": "word1", "id": 12345}, ...]}
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> tokens =
+                    (List<Map<String, Object>>) response.getBody().get("data");
+
+            if (tokens == null || tokens.isEmpty()) {
+                return Collections.emptySortedMap();
+            }
+
+            // 统计每个 token 的频率，构建 BM25 稀疏向量
+            // 简化处理：每个 token 出现一次，权重为 1.0
+            SortedMap<Long, Float> sparseVector = new java.util.TreeMap<>();
+            for (Map<String, Object> token : tokens) {
+                Long tokenId = ((Number) token.get("id")).longValue();
+                // BM25 权重简单使用词频（后续可优化为真正的 BM25 权重）
+                sparseVector.merge(tokenId, 1.0f, Float::sum);
+            }
+
+            logger.debug("查询分词完成: {} 个 token → {} 个唯一 token",
+                    tokens.size(), sparseVector.size());
+            return sparseVector;
+
+        } catch (Exception e) {
+            logger.warn("分词 API 调用失败: {}", e.getMessage());
+            return Collections.emptySortedMap();
+        }
+    }
+
+    /**
+     * RRF（Reciprocal Rank Fusion）融合算法
+     * 对两路检索结果按排名进行加权融合，返回 topK 条
+     *
+     * @param denseResults  向量路结果（已按 score 降序）
+     * @param sparseResults BM25 路结果（已按 score 降序）
+     * @param topK          最终返回数量
+     * @return RRF 融合后 topK 条结果
+     */
+    private List<SearchResult> rrfFusion(List<SearchResult> denseResults,
+                                          List<SearchResult> sparseResults,
+                                          int topK) {
+        // RRF 分数 Map: id → RRF score
+        LinkedHashMap<String, Double> rrfScores = new LinkedHashMap<>();
+        // 保留原始 SearchResult 用于获取完整信息
+        Map<String, SearchResult> resultMap = new LinkedHashMap<>();
+
+        // 处理向量路：记录排名（1-indexed）
+        for (int i = 0; i < denseResults.size(); i++) {
+            SearchResult r = denseResults.get(i);
+            String id = r.getId();
+            int rank = i + 1;  // 1-indexed rank
+            double contribution = vectorWeight / (rrfK + rank);
+            rrfScores.merge(id, contribution, Double::sum);
+            resultMap.putIfAbsent(id, r);
+        }
+
+        // 处理 BM25 路：记录排名（1-indexed）
+        for (int i = 0; i < sparseResults.size(); i++) {
+            SearchResult r = sparseResults.get(i);
+            String id = r.getId();
+            int rank = i + 1;  // 1-indexed rank
+            double contribution = bm25Weight / (rrfK + rank);
+            rrfScores.merge(id, contribution, Double::sum);
+            resultMap.putIfAbsent(id, r);
+        }
+
+        // 按 RRF 分数降序排列，取 topK
+        List<SearchResult> fused = rrfScores.entrySet().stream()
+                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                .limit(topK)
+                .map(entry -> {
+                    SearchResult original = resultMap.get(entry.getKey());
+                    SearchResult result = new SearchResult();
+                    result.setId(original.getId());
+                    result.setContent(original.getContent());
+                    result.setMetadata(original.getMetadata());
+                    // RRF 分数暂存到 score 字段（后续 Rerank 会覆盖）
+                    result.setScore(entry.getValue().floatValue());
+                    return result;
+                })
+                .collect(Collectors.toList());
+
+        logger.info("RRF 融合完成: dense={}, sparse={}, fused={}",
+                denseResults.size(), sparseResults.size(), fused.size());
+        return fused;
     }
 
     /**
