@@ -16,7 +16,16 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
+
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.client.RestTemplate;
 
 /**
  * Milvus 客户端工厂类
@@ -26,6 +35,11 @@ import java.util.concurrent.TimeUnit;
 public class MilvusClientFactory {
 
     private static final Logger logger = LoggerFactory.getLogger(MilvusClientFactory.class);
+
+    /**
+     * Milvus RESTful API 端口（v2.5.x standalone 模式下 HTTP 代理端口）
+     */
+    private static final int MILVUS_HTTP_PORT = 9091;
 
     @Autowired
     private MilvusProperties milvusProperties;
@@ -56,6 +70,13 @@ public class MilvusClientFactory {
                 // 创建索引
                 createIndexes(client);
                 logger.info("成功创建索引");
+
+                // 创建 BM25 所需组件
+                createAnalyzer(client);
+                createBm25Function(client);
+                createSparseIndex(client);
+                logger.info("BM25 组件初始化完成");
+
             } else {
                 logger.info("collection '{}' 已存在", MilvusConstants.MILVUS_COLLECTION_NAME);
             }
@@ -132,6 +153,11 @@ public class MilvusClientFactory {
                 .withDataType(DataType.JSON)
                 .build();
 
+        FieldType sparseVectorField = FieldType.newBuilder()
+                .withName(MilvusConstants.SPARSE_VECTOR_FIELD)
+                .withDataType(DataType.SparseFloatVector)
+                .build();
+
         // 创建 collection schema
         CollectionSchemaParam schema = CollectionSchemaParam.newBuilder()
                 .withEnableDynamicField(false)
@@ -139,6 +165,7 @@ public class MilvusClientFactory {
                 .addFieldType(vectorField)
                 .addFieldType(contentField)
                 .addFieldType(metadataField)
+                .addFieldType(sparseVectorField)
                 .build();
 
         // 创建 collection
@@ -175,5 +202,107 @@ public class MilvusClientFactory {
         }
         
         logger.info("成功为 vector 字段创建索引");
+    }
+
+    /**
+     * 创建中文分词器（用于 BM25）
+     */
+    private void createAnalyzer(MilvusServiceClient client) {
+        // Milvus 2.4+ 通过 RESTful API 创建 Analyzer
+        // HTTP 代理端口为 9091（独立于 gRPC 端口 19530）
+        String restUrl = String.format("http://%s:%d/v2/analyzers",
+                milvusProperties.getHost(), MILVUS_HTTP_PORT);
+
+        RestTemplate rest = new RestTemplate();
+
+        Map<String, Object> analyzerBody = new HashMap<>();
+        analyzerBody.put("name", MilvusConstants.ANALYZER_NAME);
+        analyzerBody.put("type", "chinese");
+        analyzerBody.put("params", Map.of());
+
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            if (milvusProperties.getUsername() != null
+                    && !milvusProperties.getUsername().isEmpty()) {
+                String auth = milvusProperties.getUsername() + ":"
+                        + milvusProperties.getPassword();
+                headers.setBasicAuth(
+                        Base64.getEncoder().encodeToString(auth.getBytes()));
+            }
+
+            HttpEntity<Map<String, Object>> request =
+                    new HttpEntity<>(analyzerBody, headers);
+
+            rest.postForEntity(restUrl, request, String.class);
+            logger.info("成功创建 Analyzer: {}", MilvusConstants.ANALYZER_NAME);
+        } catch (Exception e) {
+            // Analyzer 可能已存在，仅记录日志
+            logger.info("创建 Analyzer 时出现异常（可能已存在）: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 创建 BM25 Function，将 content 自动转换为 sparse_vector
+     */
+    private void createBm25Function(MilvusServiceClient client) {
+        String restUrl = String.format("http://%s:%d/v2/functions",
+                milvusProperties.getHost(), MILVUS_HTTP_PORT);
+
+        RestTemplate rest = new RestTemplate();
+
+        Map<String, Object> functionBody = new HashMap<>();
+        functionBody.put("name", MilvusConstants.BM25_FUNCTION_NAME);
+        functionBody.put("description", MilvusConstants.BM25_FUNCTION_DESC);
+        functionBody.put("type", "BM25");
+        functionBody.put("params", Map.of(
+                "input_field", "content",
+                "output_field", MilvusConstants.SPARSE_VECTOR_FIELD,
+                "analyzer", MilvusConstants.ANALYZER_NAME
+        ));
+
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            if (milvusProperties.getUsername() != null
+                    && !milvusProperties.getUsername().isEmpty()) {
+                String auth = milvusProperties.getUsername() + ":"
+                        + milvusProperties.getPassword();
+                headers.setBasicAuth(
+                        Base64.getEncoder().encodeToString(auth.getBytes()));
+            }
+
+            HttpEntity<Map<String, Object>> request =
+                    new HttpEntity<>(functionBody, headers);
+
+            ResponseEntity<String> response =
+                    rest.postForEntity(restUrl, request, String.class);
+            logger.info("成功创建 BM25 Function: {} (HTTP {})",
+                    MilvusConstants.BM25_FUNCTION_NAME, response.getStatusCode().value());
+        } catch (Exception e) {
+            // Function 可能已存在，仅记录日志
+            logger.info("创建 BM25 Function 时出现异常（可能已存在）: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 为 sparse_vector 字段创建 SPARSE_INVERTED_INDEX 索引
+     */
+    private void createSparseIndex(MilvusServiceClient client) {
+        CreateIndexParam sparseIndexParam = CreateIndexParam.newBuilder()
+                .withCollectionName(MilvusConstants.MILVUS_COLLECTION_NAME)
+                .withFieldName(MilvusConstants.SPARSE_VECTOR_FIELD)
+                .withIndexType(IndexType.SPARSE_INVERTED_INDEX)
+                .withMetricType(MetricType.IP)
+                .withSyncMode(Boolean.FALSE)
+                .build();
+
+        R<RpcStatus> response = client.createIndex(sparseIndexParam);
+        if (response.getStatus() != 0) {
+            // 索引可能已存在，记录日志但不阻断
+            logger.warn("创建 sparse index 时出现警告: {}", response.getMessage());
+        } else {
+            logger.info("成功为 sparse_vector 字段创建索引");
+        }
     }
 }

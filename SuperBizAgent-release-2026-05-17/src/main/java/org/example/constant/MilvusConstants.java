@@ -32,6 +32,26 @@ public class MilvusConstants {
      */
     public static final int DEFAULT_SHARD_NUMBER = 2;
     
+    /**
+     * Sparse vector 字段名称（BM25 稀疏向量）
+     */
+    public static final String SPARSE_VECTOR_FIELD = "sparse_vector";
+
+    /**
+     * BM25 分词器名称
+     */
+    public static final String ANALYZER_NAME = "chinese_analyzer";
+
+    /**
+     * BM25 Function 名称
+     */
+    public static final String BM25_FUNCTION_NAME = "bm25_func";
+
+    /**
+     * BM25 Function 描述
+     */
+    public static final String BM25_FUNCTION_DESC = "BM25 function for content field";
+
     private MilvusConstants() {
         // 工具类，禁止实例化
     }

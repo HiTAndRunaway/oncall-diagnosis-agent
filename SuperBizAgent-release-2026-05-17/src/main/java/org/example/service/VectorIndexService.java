@@ -11,14 +11,14 @@ import lombok.Getter;
 import lombok.Setter;
 import org.example.constant.MilvusConstants;
 import org.example.dto.DocumentChunk;
+import org.example.service.parser.DocumentParseException;
+import org.example.service.parser.DocumentParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
@@ -27,23 +27,40 @@ import java.util.*;
 /**
  * 向量索引服务
  * 负责读取文件、生成向量、存储到 Milvus
+ * 通过 DocumentParser 策略模式支持多种文件格式
  */
 @Service
 public class VectorIndexService {
 
     private static final Logger logger = LoggerFactory.getLogger(VectorIndexService.class);
 
-    @Autowired
-    private MilvusServiceClient milvusClient;
-
-    @Autowired
-    private VectorEmbeddingService embeddingService;
-
-    @Autowired
-    private DocumentChunkService chunkService;
+    private final MilvusServiceClient milvusClient;
+    private final VectorEmbeddingService embeddingService;
+    private final DocumentChunkService chunkService;
+    private final Map<String, DocumentParser> parserMap;
 
     @Value("${file.upload.path}")
     private String uploadPath;
+
+    /**
+     * 构造函数注入所有依赖和 DocumentParser 实现
+     * Spring 自动收集所有实现了 DocumentParser 接口的 Bean
+     */
+    public VectorIndexService(MilvusServiceClient milvusClient,
+                              VectorEmbeddingService embeddingService,
+                              DocumentChunkService chunkService,
+                              List<DocumentParser> parsers) {
+        this.milvusClient = milvusClient;
+        this.embeddingService = embeddingService;
+        this.chunkService = chunkService;
+        this.parserMap = new HashMap<>();
+        for (DocumentParser parser : parsers) {
+            for (String ext : parser.supportedExtensions()) {
+                parserMap.put(ext.toLowerCase(), parser);
+            }
+        }
+        logger.info("已注册 {} 个文档解析器, 支持扩展名: {}", parsers.size(), parserMap.keySet());
+    }
 
     /**
      * 索引指定目录下的所有文件
@@ -70,8 +87,8 @@ public class VectorIndexService {
             result.setDirectoryPath(directory.getAbsolutePath());
 
             // 获取所有支持的文件
-            File[] files = directory.listFiles((dir, name) -> 
-                name.endsWith(".txt") || name.endsWith(".md")
+            File[] files = directory.listFiles((dir, name) ->
+                parserMap.keySet().stream().anyMatch(ext -> name.toLowerCase().endsWith("." + ext))
             );
 
             if (files == null || files.length == 0) {
@@ -131,8 +148,20 @@ public class VectorIndexService {
 
         logger.info("开始索引文件: {}", path);
 
-        // 1. 读取文件内容
-        String content = Files.readString(path);
+        // 1. 根据扩展名选择 Parser 读取文件内容
+        String fileName = path.getFileName().toString();
+        String extension = "";
+        int dotIndex = fileName.lastIndexOf('.');
+        if (dotIndex > 0) {
+            extension = fileName.substring(dotIndex + 1).toLowerCase();
+        }
+
+        DocumentParser parser = parserMap.get(extension);
+        if (parser == null) {
+            throw new DocumentParseException("不支持的文件格式: ." + extension);
+        }
+
+        String content = parser.parse(path);
         logger.info("读取文件: {}, 内容长度: {} 字符", path, content.length());
 
         // 2. 删除该文件的旧数据（如果存在）

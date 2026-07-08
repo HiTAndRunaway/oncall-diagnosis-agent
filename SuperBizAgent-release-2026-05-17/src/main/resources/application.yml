@@ -9,7 +9,7 @@ server:
 file:
   upload:
     path: ./uploads
-    allowed-extensions: txt,md
+    allowed-extensions: txt,md,pdf
 
 milvus:
   host: localhost
@@ -80,6 +80,11 @@ rag:
     threshold: 10  # 召回数超过此值才触发重排序
     top-k: 10  # 重排序后保留的文档数
     model: "gte-rerank-v2"  # DashScope Rerank 模型
+  hybrid:
+    enabled: true          # 双路召回开关，false=退化为单路向量
+    bm25-weight: 1.0       # BM25 路 RRF 权重
+    vector-weight: 1.0     # 向量路 RRF 权重
+    rrf-k: 60              # RRF 平滑常数
 
 # Prometheus 配置
 prometheus:
