@@ -85,6 +85,17 @@ rag:
     bm25-weight: 1.0       # BM25 路 RRF 权重
     vector-weight: 1.0     # 向量路 RRF 权重
     rrf-k: 60              # RRF 平滑常数
+  rewrite:
+    strategy: direct           # 查询改写策略: prompt_rewrite | hypothetical_answer | detail_abstract | direct
+    model: qwen-turbo          # 改写用的轻量 LLM 模型
+    retry:
+      max-attempts: 3          # 超时类错误最大重试次数
+      backoff:
+        initial-interval: 5s   # 首次重试间隔
+        multiplier: 5          # 指数退避倍数（5s→25s→125s）
+    cache:
+      enabled: true            # Redis 缓存开关
+      ttl-hours: 1             # 缓存过期时间（小时）
 
 # Prometheus 配置
 prometheus:

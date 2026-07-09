@@ -12,6 +12,7 @@ import com.alibaba.dashscope.utils.Constants;
 import io.reactivex.Flowable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.example.service.rewrite.QueryRewriteService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -32,6 +33,9 @@ public class RagService {
 
     @Autowired
     private VectorSearchService vectorSearchService;
+
+    @Autowired
+    private QueryRewriteService queryRewriteService;
 
     @Value("${dashscope.api.key}")
     private String apiKey;
@@ -77,9 +81,12 @@ public class RagService {
         try {
             logger.info("收到 RAG 流式查询: {}", question);
 
-            // 1. 从向量数据库检索相关文档
-            List<VectorSearchService.SearchResult> searchResults = 
-                vectorSearchService.searchSimilarDocuments(question, topK);
+            // 1. 查询改写（策略模式，根据配置选择改写方式）
+            String rewrittenQuery = queryRewriteService.rewrite(question);
+
+            // 2. 用改写后的 query 从向量数据库检索相关文档
+            List<VectorSearchService.SearchResult> searchResults =
+                vectorSearchService.searchSimilarDocuments(rewrittenQuery, topK);
 
             // 发送检索结果
             callback.onSearchResults(searchResults);
@@ -90,9 +97,9 @@ public class RagService {
                 return;
             }
 
-            // 2. 构建上下文和提示词
+            // 3. 构建上下文和提示词（使用改写后的 query）
             String context = buildContext(searchResults);
-            String prompt = buildPrompt(question, context);
+            String prompt = buildPrompt(rewrittenQuery, context);
 
             // 3. 流式调用大语言模型（传入历史消息）
             generateAnswerStream(prompt, history, callback);
@@ -121,13 +128,13 @@ public class RagService {
     /**
      * 构建提示词
      */
-    private String buildPrompt(String question, String context) {
+    private String buildPrompt(String query, String context) {
         return String.format(
             "你是一个专业的AI助手。请根据以下参考资料回答用户的问题。\n\n" +
             "参考资料：\n%s\n" +
             "用户问题：%s\n\n" +
             "请基于上述参考资料给出准确、详细的回答。如果参考资料中没有相关信息，请明确说明。",
-            context, question
+            context, query
         );
     }
 
