@@ -69,6 +69,22 @@ document:
   chunk:
     max-size: 800  # 每个分片最大字符数
     overlap: 100   # 分片之间的重叠字符数
+    # === 以下为新增的策略配置 ===
+    strategy:
+      default-strategy: heading          # heading | fixed-size | semantic | parent-child
+      extension-overrides:               # 按扩展名覆盖（可选）
+        txt: fixed-size
+      strategies:                        # 各策略的独立参数
+        fixed-size:
+          max-size: 500
+          overlap: 100
+        semantic:
+          max-size: 800
+          overlap: 100
+        parent-child:
+          child-size: 300
+          parent-size: 1200
+          overlap: 50
 
 # RAG 配置
 rag:

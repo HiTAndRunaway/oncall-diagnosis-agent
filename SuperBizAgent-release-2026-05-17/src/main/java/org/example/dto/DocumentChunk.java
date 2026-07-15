@@ -3,6 +3,8 @@ package org.example.dto;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.util.Map;
+
 /**
  * 文档分片
  */
@@ -35,6 +37,12 @@ public class DocumentChunk {
      * 分片标题或上下文信息
      */
     private String title;
+
+    /**
+     * 策略附加的扩展元数据（如 strategy、parentId、parentContent 等）
+     * 由策略实现填充，VectorIndexService.buildMetadata() 合并到 Milvus metadata 中
+     */
+    private Map<String, Object> extraMetadata;
 
     public DocumentChunk() {
     }
