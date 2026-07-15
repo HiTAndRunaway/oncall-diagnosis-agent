@@ -1,6 +1,8 @@
 package org.example.service;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import io.milvus.client.MilvusServiceClient;
 import io.milvus.grpc.SearchResults;
 import io.milvus.param.R;
@@ -25,9 +27,11 @@ import org.springframework.web.client.RestTemplate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -227,6 +231,10 @@ public class VectorSearchService {
         }
 
         logger.info("向量检索召回 {} 个文档", results.size());
+
+        // 处理 parent-child 策略的 small-to-big 检索
+        results = resolveParentContent(results);
+
         return results;
     }
 
@@ -287,6 +295,10 @@ public class VectorSearchService {
             }
 
             logger.info("BM25 稀疏召回 {} 个文档", results.size());
+
+            // 处理 parent-child 策略的 small-to-big 检索
+            results = resolveParentContent(results);
+
             return results;
 
         } catch (Exception e) {
@@ -417,6 +429,71 @@ public class VectorSearchService {
         logger.info("RRF 融合完成: dense={}, sparse={}, fused={}",
                 denseResults.size(), sparseResults.size(), fused.size());
         return fused;
+    }
+
+    /**
+     * 解析 parent-child 策略的检索结果
+     * 检测 strategy == "parent-child" 时，将 content 替换为 parentContent，按 parentId 去重
+     */
+    private List<SearchResult> resolveParentContent(List<SearchResult> results) {
+        if (results == null || results.isEmpty()) return results;
+
+        Set<String> seenParentIds = new HashSet<>();
+        List<SearchResult> resolved = new ArrayList<>();
+
+        for (SearchResult r : results) {
+            if (r.getMetadata() == null || r.getMetadata().isEmpty()) {
+                resolved.add(r);
+                continue;
+            }
+
+            try {
+                java.util.Map<String, Object> meta = parseMetadata(r.getMetadata());
+                if (!"parent-child".equals(meta.get("strategy"))) {
+                    resolved.add(r);
+                    continue;
+                }
+
+                // parent-child 策略：去重 + 替换为 parent content
+                String parentId = (String) meta.get("parentId");
+                if (parentId != null && !parentId.isEmpty()) {
+                    if (seenParentIds.contains(parentId)) {
+                        logger.debug("parent-child 去重: parentId={}", parentId);
+                        continue;
+                    }
+                    seenParentIds.add(parentId);
+                }
+
+                String parentContent = (String) meta.get("parentContent");
+                if (parentContent != null && !parentContent.isEmpty()) {
+                    logger.debug("parent-child 替换: child content ({} 字符) → parent content ({} 字符)",
+                            r.getContent() != null ? r.getContent().length() : 0,
+                            parentContent.length());
+                    r.setContent(parentContent);
+                } else {
+                    logger.warn("parent-child 策略未找到 parentContent，降级使用 child content");
+                }
+
+            } catch (Exception e) {
+                logger.warn("解析 parent-child metadata 失败，保留原始 content: {}", e.getMessage());
+            }
+
+            resolved.add(r);
+        }
+
+        if (resolved.size() < results.size()) {
+            logger.info("parent-child 去重: {} → {} 条结果", results.size(), resolved.size());
+        }
+        return resolved;
+    }
+
+    /**
+     * 将 metadata JSON 字符串解析为 Map
+     */
+    private java.util.Map<String, Object> parseMetadata(String metadataJson) {
+        Gson gson = new Gson();
+        return gson.fromJson(metadataJson,
+                new TypeToken<java.util.Map<String, Object>>() {}.getType());
     }
 
     /**
