@@ -112,6 +112,17 @@ rag:
     cache:
       enabled: true            # Redis 缓存开关
       ttl-hours: 1             # 缓存过期时间（小时）
+  # Agentic RAG 配置（仅对话路径，不影响 AIOps）
+  agentic:
+    enabled: false                       # 全局开关：true=Agentic RAG, false=传统 RAG
+    max-search-rounds: 3                 # 最大检索轮次
+    min-relevance-score: 0.6             # 最低相关性阈值（0-1）
+    min-results-for-answer: 1            # 生成答案所需的最少达标结果数
+    fallback-strategy: use_best          # 降级策略
+    timeout-seconds: 60                  # 检索阶段总超时（秒）
+    max-sub-questions: 5                 # 问题拆解最大子问题数
+    evaluator-model: qwen-turbo          # 评估模型
+    decomposer-model: qwen-turbo         # 拆解模型
 
 # Prometheus 配置
 prometheus:
