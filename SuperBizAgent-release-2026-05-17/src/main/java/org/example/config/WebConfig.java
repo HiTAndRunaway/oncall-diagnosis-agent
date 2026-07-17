@@ -1,11 +1,13 @@
 package org.example.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.interceptor.LogInterceptor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.converter.HttpMessageConverter;
 import org.springframework.http.converter.StringHttpMessageConverter;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.nio.charset.StandardCharsets;
@@ -34,5 +36,12 @@ public class WebConfig implements WebMvcConfigurer {
     @Bean
     public ObjectMapper objectMapper() {
         return new ObjectMapper();
+    }
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(new LogInterceptor())
+                .addPathPatterns("/api/**");
+        WebMvcConfigurer.super.addInterceptors(registry);
     }
 }
