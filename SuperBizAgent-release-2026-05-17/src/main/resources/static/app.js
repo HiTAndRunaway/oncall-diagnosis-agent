@@ -8,7 +8,13 @@ class SuperBizAgentApp {
         this.currentChatHistory = []; // 当前对话的消息历史
         this.chatHistories = this.loadChatHistories(); // 所有历史对话
         this.isCurrentChatFromHistory = false; // 标记当前对话是否是从历史记录加载的
-        
+
+        // Theme
+        this.themes = ['', 'onedark', 'synthwave'];
+        this.themeNames = ['VS Code Dark+', 'One Dark Pro', 'SynthWave 84'];
+        this.currentThemeIdx = parseInt(localStorage.getItem('sbiz_theme_idx') || '0');
+        this.applyTheme();
+
         this.initializeElements();
         this.bindEvents();
         this.updateUI();
@@ -16,6 +22,20 @@ class SuperBizAgentApp {
         this.checkAndSetCentered();
         this.renderChatHistory();
     }
+
+    // ===== Theme =====
+    applyTheme() {
+        const theme = this.themes[this.currentThemeIdx];
+        document.documentElement.setAttribute('data-theme', theme);
+        const btn = document.querySelector('.status-bar .theme-switcher');
+        if (btn) btn.textContent = 'T: ' + this.themeNames[this.currentThemeIdx];
+        localStorage.setItem('sbiz_theme_idx', this.currentThemeIdx);
+    },
+
+    cycleTheme() {
+        this.currentThemeIdx = (this.currentThemeIdx + 1) % this.themes.length;
+        this.applyTheme();
+    },
 
     // 初始化Markdown配置
     initMarkdown() {
@@ -527,11 +547,11 @@ class SuperBizAgentApp {
         this.updateUI();
         
         const modeNames = {
-            'quick': '快速',
-            'stream': '流式'
+            'quick': 'QUICK',
+            'stream': 'STREAM'
         };
-        
-        this.showNotification(`已切换到${modeNames[mode]}模式`, 'info');
+
+        this.showNotification(`Switched to ${modeNames[mode]}`, 'info');
     }
 
     // 更新UI
@@ -539,10 +559,10 @@ class SuperBizAgentApp {
         // 更新模式选择器显示
         if (this.currentModeText) {
             const modeNames = {
-                'quick': '快速',
-                'stream': '流式'
+                'quick': 'QUICK',
+                'stream': 'STREAM'
             };
-            this.currentModeText.textContent = modeNames[this.currentMode] || '快速';
+            this.currentModeText.textContent = modeNames[this.currentMode] || 'QUICK';
         }
         
         // 更新下拉菜单选中状态
