@@ -35,7 +35,11 @@
                         <!-- 历史对话列表将在这里动态生成 -->
                     </div>
                 </div>
-                
+
+                <button class="memory-panel-btn" id="memoryPanelBtn" title="我的记忆">
+                    <span>🧠</span> 我的记忆
+                </button>
+
             </div>
         </aside>
 
@@ -116,6 +120,25 @@
                 </div>
             </div>
         </main>
+    </div>
+
+    <!-- 记忆面板 -->
+    <div id="memoryPanel" class="memory-panel" style="display: none;">
+        <div class="memory-panel-header">
+            <h3>🧠 我的记忆</h3>
+            <p>系统根据和你的对话自动提取，你可以随时查看和删除</p>
+            <button class="memory-close-btn" onclick="app.toggleMemoryPanel()">✕</button>
+        </div>
+        <div class="memory-stats" id="memoryStats"></div>
+        <div class="memory-tabs" id="memoryTabs">
+            <button class="memory-tab active" data-tab="facts">📌 事实结论</button>
+            <button class="memory-tab" data-tab="profiles">👤 用户画像</button>
+            <button class="memory-tab" data-tab="preferences">🎯 行为偏好</button>
+        </div>
+        <div class="memory-list" id="memoryList"></div>
+        <div class="memory-empty" id="memoryEmpty" style="display: none;">
+            📭 暂无记忆
+        </div>
     </div>
 
     <!-- 加载遮罩层 -->
