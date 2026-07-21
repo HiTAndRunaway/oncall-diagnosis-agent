@@ -40,6 +40,29 @@ public class AsyncConfig {
     }
 
     /**
+     * 记忆提取专用线程池
+     * 为异步记忆提取和冲突判断提供线程资源
+     */
+    @Bean("memoryExecutor")
+    public Executor memoryExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(50);
+        executor.setKeepAliveSeconds(60);
+        executor.setThreadNamePrefix("memory-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy() {
+            @Override
+            public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
+                logger.warn("记忆提取线程池已满，任务被拒绝: {}", e.getActiveCount());
+                super.rejectedExecution(r, e);
+            }
+        });
+        executor.initialize();
+        return executor;
+    }
+
+    /**
      * 混合检索专用线程池
      * 为双路并行召回（dense + sparse）提供线程资源
      */

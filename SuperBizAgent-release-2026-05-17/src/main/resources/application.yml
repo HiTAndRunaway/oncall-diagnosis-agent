@@ -69,6 +69,22 @@ document:
   chunk:
     max-size: 800  # 每个分片最大字符数
     overlap: 100   # 分片之间的重叠字符数
+    # === 以下为新增的策略配置 ===
+    strategy:
+      default-strategy: heading          # heading | fixed-size | semantic | parent-child
+      extension-overrides:               # 按扩展名覆盖（可选）
+        txt: fixed-size
+      strategies:                        # 各策略的独立参数
+        fixed-size:
+          max-size: 500
+          overlap: 100
+        semantic:
+          max-size: 800
+          overlap: 100
+        parent-child:
+          child-size: 300
+          parent-size: 1200
+          overlap: 50
 
 # RAG 配置
 rag:
@@ -96,6 +112,17 @@ rag:
     cache:
       enabled: true            # Redis 缓存开关
       ttl-hours: 1             # 缓存过期时间（小时）
+  # Agentic RAG 配置（仅对话路径，不影响 AIOps）
+  agentic:
+    enabled: false                       # 全局开关：true=Agentic RAG, false=传统 RAG
+    max-search-rounds: 3                 # 最大检索轮次
+    min-relevance-score: 0.6             # 最低相关性阈值（0-1）
+    min-results-for-answer: 1            # 生成答案所需的最少达标结果数
+    fallback-strategy: use_best          # 降级策略
+    timeout-seconds: 60                  # 检索阶段总超时（秒）
+    max-sub-questions: 5                 # 问题拆解最大子问题数
+    evaluator-model: qwen-turbo          # 评估模型
+    decomposer-model: qwen-turbo         # 拆解模型
 
 # Prometheus 配置
 prometheus:
@@ -106,6 +133,31 @@ prometheus:
 # CLS 云日志服务配置
 cls:
   mock-enabled: false  # 是否启用 Mock 模式（用于测试，设为 true 返回与告警关联的模拟日志数据）
+
+# Mem0 风格长期记忆配置
+memory:
+  enabled: true                          # 全局开关：false 时所有记忆功能不注册
+  extraction:
+    trigger-message-count: 6             # 会话新增消息对超过此数触发提取
+    model: qwen-turbo                    # 提取 + 冲突判断用的轻量 LLM
+    max-batch-messages: 50               # 一次提取最多分析的对话条数
+  search:
+    top-k: 5                             # recallMemory 默认返回数
+    score-threshold: 0.6                 # 冲突检测时向量相似度最低阈值
+  decay:
+    enabled: true
+    cron: "0 3 * * *"                    # 每天凌晨 3 点执行
+    decay-factor: 0.1                    # 每次衰减的置信度减少量
+    min-confidence: 0.3                  # 低于此值自动删除
+    no-access-threshold-hours: 168       # 7 天无访问触发衰减
+  ttl:
+    fact-hours: 0                        # 0 表示永不过期
+    profile-hours: 2160                  # 90 天（90 × 24）
+    preference-hours: 720                # 30 天（30 × 24）
+  system-prompt:
+    inject-profile: true                 # 是否注入用户画像到 System Prompt
+    inject-preferences: true             # 是否注入行为偏好到 System Prompt
+    max-length: 500                      # 注入内容最大字符数
 
 # 会话 Redis 存储配置
 session:

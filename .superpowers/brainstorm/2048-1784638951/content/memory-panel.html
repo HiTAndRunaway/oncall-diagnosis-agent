@@ -1,0 +1,174 @@
+<h2>「我的记忆」面板设计</h2>
+<p class="subtitle">侧边栏新增入口，点击展开记忆管理面板，Tab 切换三种记忆类型</p>
+
+<div class="mockup">
+  <div class="mockup-header">SuperBizAgent — 我的记忆面板</div>
+  <div class="mockup-body">
+
+    <!-- Sidebar + Main layout -->
+    <div style="display: flex; min-height: 500px; background: #f8f9fa; border-radius: 12px; overflow: hidden; font-family: system-ui, sans-serif;">
+
+      <!-- Sidebar -->
+      <div style="width: 240px; background: #1a1f36; color: #a0aec0; padding: 20px 0; flex-shrink: 0;">
+        <div style="padding: 0 20px 16px; font-size: 16px; font-weight: 700; color: #fff; border-bottom: 1px solid #2d3558; margin-bottom: 8px;">
+          🚀 SuperBizAgent
+        </div>
+        <div style="padding: 10px 20px; margin: 2px 8px; border-radius: 8px; font-size: 14px; cursor: pointer;">
+          💬 新对话
+        </div>
+        <div style="padding: 10px 20px; margin: 2px 8px; border-radius: 8px; font-size: 14px; color: #a0aec0; cursor: pointer;">
+          📋 会话历史
+        </div>
+        <div style="padding: 10px 20px; margin: 2px 8px; border-radius: 8px; font-size: 14px; background: #2d3558; color: #fff; font-weight: 600; cursor: pointer; border-left: 3px solid #7c5cfc;">
+          🧠 我的记忆
+        </div>
+        <div style="padding: 10px 20px; margin: 2px 8px; border-radius: 8px; font-size: 14px; color: #a0aec0; cursor: pointer;">
+          📤 文件上传
+        </div>
+        <div style="margin-top: auto; padding: 0 20px; position: absolute; bottom: 20px; left: 0; width: 240px;">
+          <div style="border-top: 1px solid #2d3558; padding-top: 12px; font-size: 12px; color: #6b7280;">
+            👤 userId: zhouzheng
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Panel -->
+      <div style="flex: 1; padding: 28px; background: #fff;">
+
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px;">
+          <div>
+            <h3 style="margin: 0 0 4px; font-size: 20px; color: #1a1f36;">🧠 我的记忆</h3>
+            <p style="margin: 0; font-size: 13px; color: #6b7280;">系统根据和你的对话自动提取，你可以随时查看和删除</p>
+          </div>
+          <button style="padding: 8px 16px; background: #7c5cfc; color: #fff; border: none; border-radius: 8px; font-size: 13px; cursor: pointer;">
+            🔄 刷新记忆
+          </button>
+        </div>
+
+        <!-- Stats row -->
+        <div style="display: flex; gap: 16px; margin-bottom: 24px;">
+          <div style="flex:1; background: #f0f4ff; padding: 16px; border-radius: 10px; text-align: center;">
+            <div style="font-size: 28px; font-weight: 700; color: #7c5cfc;">12</div>
+            <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">📌 事实</div>
+          </div>
+          <div style="flex:1; background: #f0faf0; padding: 16px; border-radius: 10px; text-align: center;">
+            <div style="font-size: 28px; font-weight: 700; color: #22c55e;">4</div>
+            <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">👤 画像</div>
+          </div>
+          <div style="flex:1; background: #fff8f0; padding: 16px; border-radius: 10px; text-align: center;">
+            <div style="font-size: 28px; font-weight: 700; color: #f59e0b;">6</div>
+            <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">🎯 偏好</div>
+          </div>
+        </div>
+
+        <!-- Tabs -->
+        <div style="display: flex; gap: 0; border-bottom: 2px solid #e5e7eb; margin-bottom: 20px;">
+          <div style="padding: 10px 20px; font-size: 14px; font-weight: 600; color: #7c5cfc; border-bottom: 2px solid #7c5cfc; margin-bottom: -2px; cursor: pointer; background: #f8f7ff; border-radius: 8px 8px 0 0;">
+            📌 事实结论 (12)
+          </div>
+          <div style="padding: 10px 20px; font-size: 14px; color: #6b7280; cursor: pointer;">
+            👤 用户画像 (4)
+          </div>
+          <div style="padding: 10px 20px; font-size: 14px; color: #6b7280; cursor: pointer;">
+            🎯 行为偏好 (6)
+          </div>
+        </div>
+
+        <!-- Memory cards -->
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+
+          <!-- Card 1 -->
+          <div style="display: flex; align-items: start; gap: 14px; padding: 16px; background: #fafbfc; border: 1px solid #e5e7eb; border-radius: 10px;">
+            <div style="flex-shrink:0; width: 36px; height: 36px; background: #f0f4ff; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px;">📌</div>
+            <div style="flex: 1; min-width: 0;">
+              <div style="font-size: 14px; color: #1a1f36; line-height: 1.5; margin-bottom: 8px;">
+                用户公司的生产环境 K8s 集群版本为 <strong>1.28</strong>，使用 Istio 作为服务网格
+              </div>
+              <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 120px; height: 6px; background: #e5e7eb; border-radius: 3px;">
+                  <div style="width: 92%; height: 100%; background: #22c55e; border-radius: 3px;"></div>
+                </div>
+                <span style="font-size: 12px; color: #22c55e; font-weight: 600;">置信度 92%</span>
+                <span style="font-size: 12px; color: #9ca3af;">来自 07-15 会话</span>
+                <button style="padding: 4px 12px; font-size: 12px; color: #ef4444; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; cursor: pointer;">🗑 删除</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 2 -->
+          <div style="display: flex; align-items: start; gap: 14px; padding: 16px; background: #fafbfc; border: 1px solid #e5e7eb; border-radius: 10px;">
+            <div style="flex-shrink:0; width: 36px; height: 36px; background: #f0f4ff; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px;">📌</div>
+            <div style="flex: 1; min-width: 0;">
+              <div style="font-size: 14px; color: #1a1f36; line-height: 1.5; margin-bottom: 8px;">
+                <strong>2026-07-15 CPU 告警</strong>的根因是 Pod <code>api-gateway-7d4f</code> 内存限制过低（512Mi），导致 OOM 重启
+              </div>
+              <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 120px; height: 6px; background: #e5e7eb; border-radius: 3px;">
+                  <div style="width: 85%; height: 100%; background: #22c55e; border-radius: 3px;"></div>
+                </div>
+                <span style="font-size: 12px; color: #22c55e; font-weight: 600;">置信度 85%</span>
+                <span style="font-size: 12px; color: #9ca3af;">来自 07-15 会话</span>
+                <button style="padding: 4px 12px; font-size: 12px; color: #ef4444; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; cursor: pointer;">🗑 删除</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 3 - decaying -->
+          <div style="display: flex; align-items: start; gap: 14px; padding: 16px; background: #fffbf0; border: 1px solid #fde68a; border-radius: 10px;">
+            <div style="flex-shrink:0; width: 36px; height: 36px; background: #fff8e1; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px;">📌</div>
+            <div style="flex: 1; min-width: 0;">
+              <div style="font-size: 14px; color: #1a1f36; line-height: 1.5; margin-bottom: 8px;">
+                用户提到监控系统使用 <strong>Prometheus + Grafana</strong>，告警规则存储在 Git 仓库中
+              </div>
+              <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 120px; height: 6px; background: #e5e7eb; border-radius: 3px;">
+                  <div style="width: 45%; height: 100%; background: #f59e0b; border-radius: 3px;"></div>
+                </div>
+                <span style="font-size: 12px; color: #f59e0b; font-weight: 600;">置信度 45% ⚠️ 衰减中</span>
+                <span style="font-size: 12px; color: #9ca3af;">来自 06-20 会话</span>
+                <span style="font-size: 11px; background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 12px;">30天未访问</span>
+                <button style="padding: 4px 12px; font-size: 12px; color: #ef4444; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; cursor: pointer;">🗑 删除</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Empty state hint (shown when tab has no items) -->
+        <div style="margin-top: 12px; padding: 40px; text-align: center; background: #f9fafb; border: 2px dashed #e5e7eb; border-radius: 12px; opacity: 0.5;">
+          <div style="font-size: 36px; margin-bottom: 8px;">📭</div>
+          <div style="font-size: 14px; color: #6b7280;">（其他 Tab 为空时的占位提示）</div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section"></div>
+
+<h3>设计要点</h3>
+
+<div class="pros-cons">
+  <div class="pros">
+    <h4>交互特性</h4>
+    <ul>
+      <li>三 Tab 切换，每种记忆类型独立展示</li>
+      <li>每条记忆显示置信度进度条 + 来源会话 + 时间</li>
+      <li>衰减记忆黄色高亮，附带"N天未访问"标签</li>
+      <li>每张卡片可直接删除</li>
+      <li>顶部统计卡片：各类型记忆数量</li>
+      <li>侧边栏底部显示当前 userId</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>需要注意</h4>
+    <ul>
+      <li>前端需在首次请求后获取并存储 userId</li>
+      <li>面板刷新时从 /api/memory/panel 获取最新数据</li>
+      <li>删除操作需二次确认（防止误删）</li>
+      <li>衰减中记忆的视觉提示不宜过于警示</li>
+    </ul>
+  </div>
+</div>

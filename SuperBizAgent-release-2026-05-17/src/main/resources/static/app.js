@@ -8,7 +8,13 @@ class SuperBizAgentApp {
         this.currentChatHistory = []; // 当前对话的消息历史
         this.chatHistories = this.loadChatHistories(); // 所有历史对话
         this.isCurrentChatFromHistory = false; // 标记当前对话是否是从历史记录加载的
-        
+
+        // Theme
+        this.themes = ['', 'onedark', 'synthwave'];
+        this.themeNames = ['VS Code Dark+', 'One Dark Pro', 'SynthWave 84'];
+        this.currentThemeIdx = parseInt(localStorage.getItem('sbiz_theme_idx') || '0');
+        this.applyTheme();
+
         this.initializeElements();
         this.bindEvents();
         this.updateUI();
@@ -16,6 +22,20 @@ class SuperBizAgentApp {
         this.checkAndSetCentered();
         this.renderChatHistory();
     }
+
+    // ===== Theme =====
+    applyTheme() {
+        const theme = this.themes[this.currentThemeIdx];
+        document.documentElement.setAttribute('data-theme', theme);
+        const btn = document.querySelector('.status-bar .theme-switcher');
+        if (btn) btn.textContent = 'T: ' + this.themeNames[this.currentThemeIdx];
+        localStorage.setItem('sbiz_theme_idx', this.currentThemeIdx);
+    },
+
+    cycleTheme() {
+        this.currentThemeIdx = (this.currentThemeIdx + 1) % this.themes.length;
+        this.applyTheme();
+    },
 
     // 初始化Markdown配置
     initMarkdown() {
@@ -116,7 +136,16 @@ class SuperBizAgentApp {
         this.chatContainer = document.querySelector('.chat-container');
         this.welcomeGreeting = document.getElementById('welcomeGreeting');
         this.chatHistoryList = document.getElementById('chatHistoryList');
-        
+
+        // 记忆面板元素
+        this.memoryPanelBtn = document.getElementById('memoryPanelBtn');
+        this.memoryPanel = document.getElementById('memoryPanel');
+        this.memoryStats = document.getElementById('memoryStats');
+        this.memoryTabs = document.getElementById('memoryTabs');
+        this.memoryList = document.getElementById('memoryList');
+        this.memoryEmpty = document.getElementById('memoryEmpty');
+        this.memoryData = null;
+
         // 初始化时检查是否需要居中
         this.checkAndSetCentered();
     }
@@ -169,6 +198,21 @@ class SuperBizAgentApp {
                 if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     this.sendMessage();
+                }
+            });
+        }
+
+        // 记忆面板按钮
+        if (this.memoryPanelBtn) {
+            this.memoryPanelBtn.addEventListener('click', () => this.toggleMemoryPanel());
+        }
+
+        // 记忆面板 Tab 切换
+        if (this.memoryTabs) {
+            this.memoryTabs.addEventListener('click', (e) => {
+                if (e.target.classList.contains('memory-tab')) {
+                    const tab = e.target.dataset.tab;
+                    this.switchMemoryTab(tab);
                 }
             });
         }
@@ -503,11 +547,11 @@ class SuperBizAgentApp {
         this.updateUI();
         
         const modeNames = {
-            'quick': '快速',
-            'stream': '流式'
+            'quick': 'QUICK',
+            'stream': 'STREAM'
         };
-        
-        this.showNotification(`已切换到${modeNames[mode]}模式`, 'info');
+
+        this.showNotification(`Switched to ${modeNames[mode]}`, 'info');
     }
 
     // 更新UI
@@ -515,10 +559,10 @@ class SuperBizAgentApp {
         // 更新模式选择器显示
         if (this.currentModeText) {
             const modeNames = {
-                'quick': '快速',
-                'stream': '流式'
+                'quick': 'QUICK',
+                'stream': 'STREAM'
             };
-            this.currentModeText.textContent = modeNames[this.currentMode] || '快速';
+            this.currentModeText.textContent = modeNames[this.currentMode] || 'QUICK';
         }
         
         // 更新下拉菜单选中状态
@@ -603,7 +647,7 @@ class SuperBizAgentApp {
     async sendQuickMessage(message) {
         // 添加等待提示消息
         const loadingMessage = this.addLoadingMessage('正在思考...');
-        
+
         try {
             const response = await fetch(`${this.apiBaseUrl}/chat`, {
                 method: 'POST',
@@ -612,7 +656,8 @@ class SuperBizAgentApp {
                 },
                 body: JSON.stringify({
                     Id: this.sessionId,
-                    Question: message
+                    Question: message,
+                    UserId: this.getUserId()
                 })
             });
 
@@ -674,7 +719,8 @@ class SuperBizAgentApp {
                 },
                 body: JSON.stringify({
                     Id: this.sessionId,
-                    Question: message
+                    Question: message,
+                    UserId: this.getUserId()
                 })
             });
 
@@ -1524,6 +1570,121 @@ class SuperBizAgentApp {
                 document.body.style.overflow = '';
             }
         }
+    }
+
+    // ===== 记忆面板方法 =====
+
+    getUserId() {
+        let userId = localStorage.getItem('sbiz_user_id');
+        if (!userId) {
+            userId = 'u_' + crypto.randomUUID();
+            localStorage.setItem('sbiz_user_id', userId);
+        }
+        return userId;
+    },
+
+    async toggleMemoryPanel() {
+        if (this.memoryPanel.style.display === 'none' || !this.memoryPanel.style.display) {
+            this.memoryPanel.style.display = 'block';
+            await this.loadMemoryPanel();
+        } else {
+            this.memoryPanel.style.display = 'none';
+        }
+    },
+
+    async loadMemoryPanel() {
+        try {
+            const userId = this.getUserId();
+            const resp = await fetch(`/api/memory/panel?userId=${encodeURIComponent(userId)}`);
+            const data = await resp.json();
+            if (!data.success) return;
+
+            this.memoryData = data;
+            this.memoryStats.innerHTML = `
+                <div class="memory-stat-card" style="background:#f0f4ff">
+                    <div class="count" style="color:#6366f1">${data.facts ? data.facts.length : 0}</div>
+                    <div class="label">📌 事实</div>
+                </div>
+                <div class="memory-stat-card" style="background:#f0fdf4">
+                    <div class="count" style="color:#22c55e">${data.profiles ? data.profiles.length : 0}</div>
+                    <div class="label">👤 画像</div>
+                </div>
+                <div class="memory-stat-card" style="background:#fff7ed">
+                    <div class="count" style="color:#f59e0b">${data.preferences ? data.preferences.length : 0}</div>
+                    <div class="label">🎯 偏好</div>
+                </div>
+            `;
+            this.renderMemoryTab('facts');
+        } catch (e) {
+            console.error('加载记忆面板失败', e);
+        }
+    },
+
+    switchMemoryTab(tab) {
+        document.querySelectorAll('.memory-tab').forEach(t => t.classList.remove('active'));
+        const activeTab = document.querySelector(`[data-tab="${tab}"]`);
+        if (activeTab) activeTab.classList.add('active');
+        this.renderMemoryTab(tab);
+    },
+
+    renderMemoryTab(tab) {
+        const data = (this.memoryData && this.memoryData[tab]) ? this.memoryData[tab] : [];
+        const list = this.memoryList;
+        const empty = this.memoryEmpty;
+
+        if (data.length === 0) {
+            list.innerHTML = '';
+            empty.style.display = 'block';
+            return;
+        }
+
+        empty.style.display = 'none';
+        list.innerHTML = data.map(m => {
+            const confPercent = m.confidencePercent || Math.round(m.confidence * 100);
+            const confColor = confPercent >= 70 ? '#22c55e' : confPercent >= 40 ? '#f59e0b' : '#ef4444';
+            const now = Date.now();
+            const hoursSinceAccess = m.lastAccessedAt ? (now - m.lastAccessedAt) / 3600000 : 0;
+            const isDecaying = hoursSinceAccess > 168;
+            const sourceDate = m.createdAt ? new Date(m.createdAt).toLocaleDateString('zh-CN') : '';
+
+            return `
+                <div class="memory-card ${isDecaying ? 'decaying' : ''}">
+                    <div style="flex:1;min-width:0">
+                        <div class="memory-card-content">${this.escapeHtml(m.content)}</div>
+                        <div class="memory-card-meta">
+                            <div class="memory-conf-bar">
+                                <div class="memory-conf-fill" style="width:${confPercent}%;background:${confColor}"></div>
+                            </div>
+                            <span style="font-size:12px;color:${confColor};font-weight:600">${confPercent}%</span>
+                            <span style="font-size:12px;color:#9ca3af">${sourceDate} 会话</span>
+                            ${isDecaying ? `<span class="memory-decay-tag">${Math.floor(hoursSinceAccess/24)}天未访问</span>` : ''}
+                            <button class="memory-delete-btn" onclick="app.deleteMemory('${m.id}')">🗑 删除</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    },
+
+    async deleteMemory(memoryId) {
+        if (!confirm('确定要删除这条记忆吗？')) return;
+        try {
+            const userId = this.getUserId();
+            const resp = await fetch(`/api/memory/${encodeURIComponent(memoryId)}?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
+            const data = await resp.json();
+            if (data.success) {
+                await this.loadMemoryPanel();
+            }
+        } catch (e) {
+            console.error('删除记忆失败', e);
+        }
+    },
+
+    escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 }
 

@@ -11,6 +11,8 @@ import lombok.Getter;
 import lombok.Setter;
 import org.example.constant.MilvusConstants;
 import org.example.dto.DocumentChunk;
+import org.example.service.chunk.ChunkStrategyFactory;
+import org.example.service.chunk.DocumentChunkStrategy;
 import org.example.service.parser.DocumentParseException;
 import org.example.service.parser.DocumentParser;
 import org.slf4j.Logger;
@@ -36,7 +38,7 @@ public class VectorIndexService {
 
     private final MilvusServiceClient milvusClient;
     private final VectorEmbeddingService embeddingService;
-    private final DocumentChunkService chunkService;
+    private final ChunkStrategyFactory chunkStrategyFactory;
     private final Map<String, DocumentParser> parserMap;
 
     @Value("${file.upload.path}")
@@ -48,11 +50,11 @@ public class VectorIndexService {
      */
     public VectorIndexService(MilvusServiceClient milvusClient,
                               VectorEmbeddingService embeddingService,
-                              DocumentChunkService chunkService,
+                              ChunkStrategyFactory chunkStrategyFactory,
                               List<DocumentParser> parsers) {
         this.milvusClient = milvusClient;
         this.embeddingService = embeddingService;
-        this.chunkService = chunkService;
+        this.chunkStrategyFactory = chunkStrategyFactory;
         this.parserMap = new HashMap<>();
         for (DocumentParser parser : parsers) {
             for (String ext : parser.supportedExtensions()) {
@@ -167,8 +169,10 @@ public class VectorIndexService {
         // 2. 删除该文件的旧数据（如果存在）
         deleteExistingData(path.toString());
 
-        // 3. 文档分片
-        List<DocumentChunk> chunks = chunkService.chunkDocument(content, path.toString());
+        // 3. 文档分片（通过策略工厂选择策略）
+        DocumentChunkStrategy strategy = chunkStrategyFactory.getStrategy(extension);
+        logger.info("使用策略 '{}' 切分文件: {}", strategy.strategyName(), filePath);
+        List<DocumentChunk> chunks = strategy.chunk(content, path.toString());
         logger.info("文档分片完成: {} -> {} 个分片", filePath, chunks.size());
 
         // 4. 为每个分片生成向量并插入 Milvus
@@ -274,7 +278,12 @@ public class VectorIndexService {
         if (chunk.getTitle() != null && !chunk.getTitle().isEmpty()) {
             metadata.put("title", chunk.getTitle());
         }
-        
+
+        // 合并策略附加的扩展元数据（如 parent-child 的 parentId、parentContent 等）
+        if (chunk.getExtraMetadata() != null) {
+            metadata.putAll(chunk.getExtraMetadata());
+        }
+
         return metadata;
     }
 

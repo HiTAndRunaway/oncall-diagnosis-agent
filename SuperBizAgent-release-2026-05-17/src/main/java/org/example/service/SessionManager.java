@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -48,6 +49,12 @@ public class SessionManager {
 
     @Autowired(required = false)
     private SummaryGenerator summaryGenerator;
+
+    @Autowired(required = false)
+    private MemoryExtractor memoryExtractor;
+
+    @Autowired(required = false)
+    private org.example.config.MemoryProperties memoryProperties;
 
     // ==================== 公共 API ====================
 
@@ -117,7 +124,7 @@ public class SessionManager {
      * @param aiMessage   AI 回复
      */
     @SuppressWarnings("unchecked")
-    public void addMessage(String sessionId, String userMessage, String aiMessage) {
+    public void addMessage(String sessionId, String userMessage, String aiMessage, String userId) {
         if (sessionId == null || sessionId.isEmpty()) {
             return;
         }
@@ -182,6 +189,18 @@ public class SessionManager {
                 && summaryGenerator != null
                 && messagePairCount > props.getSummary().getTriggerThreshold()) {
             summaryGenerator.triggerAsync(sessionId);
+        }
+
+        // 8. 检查是否需要触发记忆提取
+        if (memoryProperties != null && memoryProperties.isEnabled()
+                && memoryExtractor != null && userId != null && !userId.isEmpty()) {
+            SessionMeta meta = getSessionMeta(sessionId);
+            int lastExtracted = (meta != null) ? meta.getLastExtractedMessageCount() : 0;
+            int newPairs = messagePairCount - lastExtracted;
+            if (newPairs >= memoryProperties.getExtraction().getTriggerMessageCount()) {
+                logger.info("触发异步记忆提取 - sessionId={}, 新增{}对消息", sessionId, newPairs);
+                memoryExtractor.extractAsync(sessionId, userId);
+            }
         }
     }
 
@@ -308,6 +327,18 @@ public class SessionManager {
 
     // ==================== 内部方法 ====================
 
+    /**
+     * 更新会话元数据（供 MemoryExtractor 使用）
+     */
+    void updateSessionMeta(String sessionId, SessionMeta meta) {
+        try {
+            String metaJson = redisObjectMapper.writeValueAsString(meta);
+            writeWithTTL(metaKey(sessionId), metaJson);
+        } catch (JsonProcessingException e) {
+            logger.warn("序列化元数据失败 - SessionId: {}", sessionId, e);
+        }
+    }
+
     private void updateMeta(String sessionId, int messagePairCount) {
         SessionMeta meta = getSessionMeta(sessionId);
         if (meta == null) {
@@ -423,6 +454,8 @@ public class SessionManager {
         private int messagePairCount;
         private long lastAccessTime;
         private long lastSummaryTime;
+        /** 上次记忆提取时的消息对数，用于判断增量 */
+        private int lastExtractedMessageCount;
 
         public long getCreateTime() { return createTime; }
         public void setCreateTime(long createTime) { this.createTime = createTime; }
@@ -432,5 +465,9 @@ public class SessionManager {
         public void setLastAccessTime(long lastAccessTime) { this.lastAccessTime = lastAccessTime; }
         public long getLastSummaryTime() { return lastSummaryTime; }
         public void setLastSummaryTime(long lastSummaryTime) { this.lastSummaryTime = lastSummaryTime; }
+        public int getLastExtractedMessageCount() { return lastExtractedMessageCount; }
+        public void setLastExtractedMessageCount(int lastExtractedMessageCount) {
+            this.lastExtractedMessageCount = lastExtractedMessageCount;
+        }
     }
 }
