@@ -40,10 +40,6 @@ public class AsyncConfig {
     }
 
     /**
-     * 混合检索专用线程池
-     * 为双路并行召回（dense + sparse）提供线程资源
-     */
-    /**
      * 记忆提取专用线程池
      * 为异步记忆提取和冲突判断提供线程资源
      */
@@ -66,6 +62,10 @@ public class AsyncConfig {
         return executor;
     }
 
+    /**
+     * 混合检索专用线程池
+     * 为双路并行召回（dense + sparse）提供线程资源
+     */
     @Bean("searchExecutor")
     public Executor searchExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

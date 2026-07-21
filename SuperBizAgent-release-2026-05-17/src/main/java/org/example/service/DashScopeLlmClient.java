@@ -8,6 +8,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.LinkedHashMap;
@@ -32,7 +33,14 @@ public class DashScopeLlmClient {
     @Value("${dashscope.api.key}")
     private String apiKey;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate = createRestTemplate();
+
+    private static RestTemplate createRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(10000);  // 10 秒连接超时
+        factory.setReadTimeout(60000);     // 60 秒读取超时
+        return new RestTemplate(factory);
+    }
 
     /**
      * 调用 DashScope LLM，返回 message.content 文本

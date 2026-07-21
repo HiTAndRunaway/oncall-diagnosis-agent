@@ -313,7 +313,7 @@ public class MemoryManager {
     /**
      * 更新记忆内容和元数据（用于冲突处理 UPDATE/MERGE）
      */
-    public boolean updateMemory(String memoryId, String newContent,
+    public boolean updateMemory(String memoryId, String userId, String newContent,
                                  Map<String, Object> newMetadata) {
         newMetadata.put("updatedAt", Instant.now().toEpochMilli());
 
@@ -323,6 +323,8 @@ public class MemoryManager {
             List<InsertParam.Field> fields = new ArrayList<>();
             fields.add(new InsertParam.Field(
                     "id", Collections.singletonList(memoryId)));
+            fields.add(new InsertParam.Field(
+                    "user_id", Collections.singletonList(userId)));
             fields.add(new InsertParam.Field(
                     "vector", Collections.singletonList(vector)));
             fields.add(new InsertParam.Field(
@@ -350,18 +352,61 @@ public class MemoryManager {
 
     /**
      * 更新记忆的 lastAccessedAt（touch）
+     * 先查询完整记录，再 upsert 全部字段，避免 Milvus upsert 丢失数据
      */
     private void touchMemory(String memoryId) {
         try {
+            // 1. 查询完整记录
+            QueryParam queryParam = QueryParam.newBuilder()
+                    .withCollectionName(MilvusConstants.MEMORY_COLLECTION_NAME)
+                    .withExpr("id == \"" + memoryId + "\"")
+                    .withOutFields(Arrays.asList("id", "user_id", "vector", "content", "metadata"))
+                    .withLimit(1L)
+                    .build();
+
+            R<QueryResults> queryResponse = milvusClient.query(queryParam);
+            if (queryResponse.getStatus() != 0) {
+                return;
+            }
+
+            QueryResultsWrapper wrapper = new QueryResultsWrapper(queryResponse.getData());
+            List<QueryResultsWrapper.RowRecord> records = wrapper.getRowRecords();
+            if (records.isEmpty()) return;
+
+            QueryResultsWrapper.RowRecord record = records.get(0);
+
+            // 2. 更新 lastAccessedAt
             long now = Instant.now().toEpochMilli();
-            Map<String, Object> meta = new LinkedHashMap<>();
-            meta.put("lastAccessedAt", now);
+            Map<String, Object> metadata;
+            Object metaObj = record.get("metadata");
+            if (metaObj instanceof String) {
+                metadata = objectMapper.readValue((String) metaObj,
+                        new TypeReference<Map<String, Object>>() {});
+            } else if (metaObj instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> m = (Map<String, Object>) metaObj;
+                metadata = new LinkedHashMap<>(m);
+            } else {
+                metadata = new LinkedHashMap<>();
+            }
+            metadata.put("lastAccessedAt", now);
+
+            // 3. Upsert 全部 5 个字段
+            String userId = (String) record.get("user_id");
+            String content = (String) record.get("content");
+            @SuppressWarnings("unchecked")
+            List<Float> vector = (List<Float>) record.get("vector");
 
             List<InsertParam.Field> fields = new ArrayList<>();
-            fields.add(new InsertParam.Field(
-                    "id", Collections.singletonList(memoryId)));
-            fields.add(new InsertParam.Field(
-                    "metadata", Collections.singletonList(objectMapper.writeValueAsString(meta))));
+            fields.add(new InsertParam.Field("id", Collections.singletonList(memoryId)));
+            fields.add(new InsertParam.Field("user_id",
+                    Collections.singletonList(userId != null ? userId : "")));
+            fields.add(new InsertParam.Field("vector",
+                    Collections.singletonList(vector != null ? vector : Collections.emptyList())));
+            fields.add(new InsertParam.Field("content",
+                    Collections.singletonList(content != null ? content : "")));
+            fields.add(new InsertParam.Field("metadata",
+                    Collections.singletonList(objectMapper.writeValueAsString(metadata))));
 
             milvusClient.upsert(UpsertParam.newBuilder()
                     .withCollectionName(MilvusConstants.MEMORY_COLLECTION_NAME)

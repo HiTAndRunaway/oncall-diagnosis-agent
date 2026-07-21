@@ -1,5 +1,6 @@
 package org.example.agent.tool;
 
+import org.example.config.MemoryProperties;
 import org.example.service.MemoryManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,6 +24,9 @@ public class ForgetMemoryTool {
 
     @Autowired
     private MemoryManager memoryManager;
+
+    @Autowired
+    private MemoryProperties memoryProperties;
 
     @Tool(description = """
             删除用户的记忆。当用户明确要求"忘记"某些信息时调用。\
@@ -48,7 +52,7 @@ public class ForgetMemoryTool {
         // 2. 删除匹配的记忆
         int deleted = 0;
         for (MemoryManager.MemoryResult match : matches) {
-            if (match.getScore() > 0.5) {  // 相似度阈值
+            if (match.getScore() > memoryProperties.getSearch().getScoreThreshold()) {
                 if (memoryManager.deleteMemory(match.getId())) {
                     deleted++;
                 }

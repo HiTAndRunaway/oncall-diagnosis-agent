@@ -166,7 +166,7 @@ public class MemoryExtractor {
                         newMeta.put("confidence", Math.max(confidence, conflict.getConfidence()));
                         newMeta.put("sourceSession", sessionId);
                         newMeta.put("decayCount", 0);
-                        memoryManager.updateMemory(conflict.getId(), content, newMeta);
+                        memoryManager.updateMemory(conflict.getId(), userId, content, newMeta);
                         updateCount++;
                         break;
                     case "MERGE":
@@ -176,7 +176,7 @@ public class MemoryExtractor {
                         mergeMeta.put("confidence", Math.max(confidence, conflict.getConfidence()));
                         mergeMeta.put("sourceSession", sessionId);
                         mergeMeta.put("decayCount", 0);
-                        memoryManager.updateMemory(conflict.getId(), mergedContent, mergeMeta);
+                        memoryManager.updateMemory(conflict.getId(), userId, mergedContent, mergeMeta);
                         mergeCount++;
                         break;
                     default: // NEW
