@@ -93,4 +93,60 @@ public class DashScopeLlmClient {
         }
         return (String) message.get("content");
     }
+
+    /**
+     * 调用 DashScope LLM，支持 system prompt + user message
+     *
+     * @param model        模型名称
+     * @param systemPrompt 系统提示词
+     * @param userMessage  用户消息
+     * @param temperature  温度参数
+     * @param maxTokens    最大输出 token 数
+     * @return LLM 返回的文本内容
+     */
+    @SuppressWarnings("unchecked")
+    public String callWithSystemPrompt(String model, String systemPrompt,
+                                        String userMessage, double temperature, int maxTokens) {
+        Map<String, Object> requestBody = new LinkedHashMap<>();
+        requestBody.put("model", model);
+
+        Map<String, Object> input = new LinkedHashMap<>();
+        List<Map<String, String>> messages = new java.util.ArrayList<>();
+        messages.add(Map.of("role", "system", "content", systemPrompt));
+        messages.add(Map.of("role", "user", "content", userMessage));
+        input.put("messages", messages);
+        requestBody.put("input", input);
+
+        Map<String, Object> parameters = new LinkedHashMap<>();
+        parameters.put("result_format", "message");
+        parameters.put("temperature", temperature);
+        parameters.put("max_tokens", maxTokens);
+        requestBody.put("parameters", parameters);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(apiKey);
+
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
+
+        ResponseEntity<Map> response = restTemplate.postForEntity(DASHSCOPE_API_URL, entity, Map.class);
+
+        if (response.getBody() == null) {
+            throw new RuntimeException("DashScope API 返回空响应");
+        }
+
+        Map<String, Object> output = (Map<String, Object>) response.getBody().get("output");
+        if (output == null) {
+            throw new RuntimeException("DashScope API 返回无 output 字段");
+        }
+        List<Map<String, Object>> choices = (List<Map<String, Object>>) output.get("choices");
+        if (choices == null || choices.isEmpty()) {
+            throw new RuntimeException("DashScope API 返回无 choices");
+        }
+        Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
+        if (message == null) {
+            throw new RuntimeException("DashScope API 返回无 message");
+        }
+        return (String) message.get("content");
+    }
 }

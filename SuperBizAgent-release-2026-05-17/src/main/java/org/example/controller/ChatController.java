@@ -10,6 +10,7 @@ import com.alibaba.cloud.ai.graph.streaming.OutputType;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import lombok.Getter;
 import lombok.Setter;
+import org.example.agent.tool.RecallMemoryTool;
 import org.example.service.AiOpsService;
 import org.example.service.ChatService;
 import org.example.service.SessionManager;
@@ -68,6 +69,11 @@ public class ChatController {
                 return ResponseEntity.ok(ApiResponse.success(ChatResponse.error("问题内容不能为空")));
             }
 
+            // 设置记忆工具当前 userId
+            String userId = request.getUserId();
+            RecallMemoryTool.setCurrentUserId(userId);
+            try {
+
             // 获取或创建会话
             SessionManager.SessionContext ctx = sessionManager.getOrCreateSession(request.getId());
             String sessionId = ctx.getSessionId();
@@ -89,23 +95,28 @@ public class ChatController {
             chatService.logAvailableTools();
 
             logger.info("开始 ReactAgent 对话（支持自动工具调用）");
-            
-            // 构建系统提示词（包含历史消息或摘要）
-            String systemPrompt = chatService.buildSystemPrompt(history, ctx.getSummary());
-            
+
+            // 构建系统提示词（包含历史消息或摘要 + 用户画像）
+            String systemPrompt = chatService.buildSystemPrompt(history, ctx.getSummary(), userId);
+
             // 创建 ReactAgent
             ReactAgent agent = chatService.createReactAgent(chatModel, systemPrompt);
-            
+
             // 执行对话
             String fullAnswer = chatService.executeChat(agent, request.getQuestion());
-            
+
             // 更新会话历史到 Redis
-            sessionManager.addMessage(sessionId, request.getQuestion(), fullAnswer);
+            sessionManager.addMessage(sessionId, request.getQuestion(), fullAnswer, userId);
             logger.info("已更新会话历史 - SessionId: {}", sessionId);
 
             return ResponseEntity.ok(ApiResponse.success(ChatResponse.success(fullAnswer, sessionId)));
 
+            } finally {
+                RecallMemoryTool.clearCurrentUserId();
+            }
+
         } catch (Exception e) {
+            RecallMemoryTool.clearCurrentUserId();
             logger.error("对话失败", e);
             return ResponseEntity.ok(ApiResponse.success(ChatResponse.error(e.getMessage())));
         }
@@ -157,6 +168,8 @@ public class ChatController {
         }
 
         executor.execute(() -> {
+            String userId = request.getUserId();
+            RecallMemoryTool.setCurrentUserId(userId);
             try {
                 logger.info("收到 ReactAgent 对话请求 - SessionId: {}, Question: {}", request.getId(), request.getQuestion());
 
@@ -181,9 +194,9 @@ public class ChatController {
                 chatService.logAvailableTools();
 
                 logger.info("开始 ReactAgent 流式对话（支持自动工具调用）");
-                
-                // 构建系统提示词（包含历史消息或摘要）
-                String systemPrompt = chatService.buildSystemPrompt(history, ctx.getSummary());
+
+                // 构建系统提示词（包含历史消息或摘要 + 用户画像）
+                String systemPrompt = chatService.buildSystemPrompt(history, ctx.getSummary(), userId);
                 
                 // 创建 ReactAgent
                 ReactAgent agent = chatService.createReactAgent(chatModel, systemPrompt);
@@ -233,6 +246,7 @@ public class ChatController {
                     },
                     error -> {
                         // 错误处理
+                        RecallMemoryTool.clearCurrentUserId();
                         logger.error("ReactAgent 流式对话失败", error);
                         try {
                             emitter.send(SseEmitter.event()
@@ -246,12 +260,13 @@ public class ChatController {
                     () -> {
                         // 完成处理
                         try {
+                            RecallMemoryTool.clearCurrentUserId();
                             String fullAnswer = fullAnswerBuilder.toString();
                             logger.info("ReactAgent 流式对话完成 - SessionId: {}, 答案长度: {}",
                                 sessionId, fullAnswer.length());
 
                             // 更新会话历史到 Redis
-                            sessionManager.addMessage(sessionId, request.getQuestion(), fullAnswer);
+                            sessionManager.addMessage(sessionId, request.getQuestion(), fullAnswer, userId);
                             logger.info("已更新会话历史 - SessionId: {}", sessionId);
 
                             // 发送完成标记（包含 sessionId）
@@ -425,11 +440,14 @@ public class ChatController {
         @com.fasterxml.jackson.annotation.JsonProperty(value = "Id")
         @com.fasterxml.jackson.annotation.JsonAlias({"id", "ID"})
         private String Id;
-        
+
         @com.fasterxml.jackson.annotation.JsonProperty(value = "Question")
         @com.fasterxml.jackson.annotation.JsonAlias({"question", "QUESTION"})
         private String Question;
 
+        @com.fasterxml.jackson.annotation.JsonProperty(value = "UserId")
+        @com.fasterxml.jackson.annotation.JsonAlias({"userId", "user_id", "USERID"})
+        private String UserId;
     }
 
     /**

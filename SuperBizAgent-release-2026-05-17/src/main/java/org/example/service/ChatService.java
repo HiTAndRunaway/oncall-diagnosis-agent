@@ -8,12 +8,15 @@ import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
 import org.example.agent.tool.DateTimeTools;
 import org.example.agent.tool.DecomposeQuestionTool;
 import org.example.agent.tool.EvaluateSearchResultsTool;
+import org.example.agent.tool.ForgetMemoryTool;
 import org.example.agent.tool.GetSearchCapabilitiesTool;
 import org.example.agent.tool.InternalDocsTools;
 import org.example.agent.tool.QueryLogsTools;
 import org.example.agent.tool.QueryMetricsTools;
+import org.example.agent.tool.RecallMemoryTool;
 import org.example.agent.tool.RefineQueryTool;
 import org.example.agent.tool.SearchKnowledgeBaseTool;
+import org.example.config.MemoryProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.ToolCallback;
@@ -78,6 +81,22 @@ public class ChatService {
     @Value("${rag.agentic.min-relevance-score:0.6}")
     private double agenticMinRelevanceScore;
 
+    // ===== 记忆注入 =====
+    @Autowired(required = false)
+    private MemoryManager memoryManager;
+
+    @Autowired(required = false)
+    private MemoryProperties memoryProperties;
+
+    @Value("${memory.enabled:false}")
+    private boolean memoryEnabled;
+
+    @Autowired(required = false)
+    private RecallMemoryTool recallMemoryTool;
+
+    @Autowired(required = false)
+    private ForgetMemoryTool forgetMemoryTool;
+
     /**
      * 创建 DashScope API 实例
      */
@@ -118,7 +137,7 @@ public class ChatService {
      * @param summary 对话摘要（可为 null）
      * @return 完整的系统提示词
      */
-    public String buildSystemPrompt(List<Map<String, String>> history, String summary) {
+    public String buildSystemPrompt(List<Map<String, String>> history, String summary, String userId) {
         StringBuilder systemPromptBuilder = new StringBuilder();
 
         // 基础系统提示
@@ -134,6 +153,14 @@ public class ChatService {
         }
 
         systemPromptBuilder.append("\n");
+
+        // 记忆注入：用户画像 + 偏好
+        if (memoryEnabled && memoryManager != null && memoryProperties != null) {
+            String memoryBlock = buildMemoryProfileBlock(userId);
+            if (!memoryBlock.isEmpty()) {
+                systemPromptBuilder.append(memoryBlock);
+            }
+        }
 
         // 摘要模式：优先使用摘要
         if (summary != null && !summary.isEmpty()) {
@@ -171,7 +198,7 @@ public class ChatService {
      * @return 完整的系统提示词
      */
     public String buildSystemPrompt(List<Map<String, String>> history) {
-        return buildSystemPrompt(history, null);
+        return buildSystemPrompt(history, null, null);
     }
 
     /**
@@ -196,6 +223,12 @@ public class ChatService {
             if (refineQueryTool != null) toolList.add(refineQueryTool);
             if (decomposeQuestionTool != null) toolList.add(decomposeQuestionTool);
             if (getSearchCapabilitiesTool != null) toolList.add(getSearchCapabilitiesTool);
+        }
+
+        // 记忆工具（仅在 memory.enabled 时注册）
+        if (memoryEnabled) {
+            if (recallMemoryTool != null) toolList.add(recallMemoryTool);
+            if (forgetMemoryTool != null) toolList.add(forgetMemoryTool);
         }
 
         return toolList.toArray();
@@ -249,6 +282,34 @@ public class ChatService {
         String answer = response.getText();
         logger.info("ReactAgent 对话完成，答案长度: {}", answer.length());
         return answer;
+    }
+
+    /**
+     * 构建用户画像记忆区块（供 System Prompt 注入）
+     */
+    private String buildMemoryProfileBlock(String userId) {
+        if (userId == null || userId.isEmpty()) return "";
+
+        List<String> types = new ArrayList<>();
+        if (memoryProperties.getSystemPrompt().isInjectProfile()) types.add("PROFILE");
+        if (memoryProperties.getSystemPrompt().isInjectPreferences()) types.add("PREFERENCE");
+        if (types.isEmpty()) return "";
+
+        List<MemoryManager.MemoryResult> memories = memoryManager.getMemoriesByTypes(
+                userId, types,
+                memoryProperties.getSystemPrompt().getMaxLength()
+        );
+
+        if (memories.isEmpty()) return "";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n## 用户画像\n\n");
+        sb.append("关于用户你知道：\n");
+        for (MemoryManager.MemoryResult m : memories) {
+            sb.append("- ").append(m.getContent()).append("\n");
+        }
+        sb.append("\n");
+        return sb.toString();
     }
 
     /**
