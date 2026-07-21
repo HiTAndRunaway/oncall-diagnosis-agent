@@ -52,6 +52,16 @@ public class MilvusConstants {
      */
     public static final String BM25_FUNCTION_DESC = "BM25 function for content field";
 
+    /**
+     * 用户记忆 collection 名称
+     */
+    public static final String MEMORY_COLLECTION_NAME = "user_memory";
+
+    /**
+     * 记忆内容字段最大长度
+     */
+    public static final int MEMORY_CONTENT_MAX_LENGTH = 4096;
+
     private MilvusConstants() {
         // 工具类，禁止实例化
     }

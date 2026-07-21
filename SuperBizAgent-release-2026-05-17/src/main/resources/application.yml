@@ -134,6 +134,31 @@ prometheus:
 cls:
   mock-enabled: false  # 是否启用 Mock 模式（用于测试，设为 true 返回与告警关联的模拟日志数据）
 
+# Mem0 风格长期记忆配置
+memory:
+  enabled: true                          # 全局开关：false 时所有记忆功能不注册
+  extraction:
+    trigger-message-count: 6             # 会话新增消息对超过此数触发提取
+    model: qwen-turbo                    # 提取 + 冲突判断用的轻量 LLM
+    max-batch-messages: 50               # 一次提取最多分析的对话条数
+  search:
+    top-k: 5                             # recallMemory 默认返回数
+    score-threshold: 0.6                 # 冲突检测时向量相似度最低阈值
+  decay:
+    enabled: true
+    cron: "0 3 * * *"                    # 每天凌晨 3 点执行
+    decay-factor: 0.1                    # 每次衰减的置信度减少量
+    min-confidence: 0.3                  # 低于此值自动删除
+    no-access-threshold-hours: 168       # 7 天无访问触发衰减
+  ttl:
+    fact-hours: 0                        # 0 表示永不过期
+    profile-hours: 2160                  # 90 天（90 × 24）
+    preference-hours: 720                # 30 天（30 × 24）
+  system-prompt:
+    inject-profile: true                 # 是否注入用户画像到 System Prompt
+    inject-preferences: true             # 是否注入行为偏好到 System Prompt
+    max-length: 500                      # 注入内容最大字符数
+
 # 会话 Redis 存储配置
 session:
   redis:

@@ -81,6 +81,17 @@ public class MilvusClientFactory {
                 logger.info("collection '{}' 已存在", MilvusConstants.MILVUS_COLLECTION_NAME);
             }
 
+            // 3. 检查并创建 user_memory collection（如果不存在）
+            if (!collectionExists(client, MilvusConstants.MEMORY_COLLECTION_NAME)) {
+                logger.info("collection '{}' 不存在，正在创建...", MilvusConstants.MEMORY_COLLECTION_NAME);
+                createUserMemoryCollection(client);
+                logger.info("成功创建 collection '{}'", MilvusConstants.MEMORY_COLLECTION_NAME);
+                createUserMemoryIndexes(client);
+                logger.info("成功创建 user_memory 索引");
+            } else {
+                logger.info("collection '{}' 已存在", MilvusConstants.MEMORY_COLLECTION_NAME);
+            }
+
             return client;
 
         } catch (Exception e) {
@@ -283,6 +294,100 @@ public class MilvusClientFactory {
             // Function 可能已存在，仅记录日志
             logger.info("创建 BM25 Function 时出现异常（可能已存在）: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 创建 user_memory collection（用户长期记忆）
+     * 无 BM25/稀疏向量，仅 dense vector + userId 过滤
+     */
+    private void createUserMemoryCollection(MilvusServiceClient client) {
+        FieldType idField = FieldType.newBuilder()
+                .withName("id")
+                .withDataType(DataType.VarChar)
+                .withMaxLength(MilvusConstants.ID_MAX_LENGTH)
+                .withPrimaryKey(true)
+                .build();
+
+        FieldType userIdField = FieldType.newBuilder()
+                .withName("user_id")
+                .withDataType(DataType.VarChar)
+                .withMaxLength(128)
+                .build();
+
+        FieldType vectorField = FieldType.newBuilder()
+                .withName("vector")
+                .withDataType(DataType.FloatVector)
+                .withDimension(MilvusConstants.VECTOR_DIM)
+                .build();
+
+        FieldType contentField = FieldType.newBuilder()
+                .withName("content")
+                .withDataType(DataType.VarChar)
+                .withMaxLength(MilvusConstants.MEMORY_CONTENT_MAX_LENGTH)
+                .build();
+
+        FieldType metadataField = FieldType.newBuilder()
+                .withName("metadata")
+                .withDataType(DataType.JSON)
+                .build();
+
+        CollectionSchemaParam schema = CollectionSchemaParam.newBuilder()
+                .withEnableDynamicField(false)
+                .addFieldType(idField)
+                .addFieldType(userIdField)
+                .addFieldType(vectorField)
+                .addFieldType(contentField)
+                .addFieldType(metadataField)
+                .build();
+
+        CreateCollectionParam createParam = CreateCollectionParam.newBuilder()
+                .withCollectionName(MilvusConstants.MEMORY_COLLECTION_NAME)
+                .withDescription("User long-term memory collection")
+                .withSchema(schema)
+                .withShardsNum(1)  // 记忆数据量小，单分片即可
+                .build();
+
+        R<RpcStatus> response = client.createCollection(createParam);
+        if (response.getStatus() != 0) {
+            throw new RuntimeException("创建 user_memory collection 失败: " + response.getMessage());
+        }
+    }
+
+    /**
+     * 为 user_memory collection 创建索引
+     * - vector: IVF_FLAT + L2
+     * - user_id: 标量索引（用于过滤查询）
+     */
+    private void createUserMemoryIndexes(MilvusServiceClient client) {
+        CreateIndexParam vectorIndexParam = CreateIndexParam.newBuilder()
+                .withCollectionName(MilvusConstants.MEMORY_COLLECTION_NAME)
+                .withFieldName("vector")
+                .withIndexType(IndexType.IVF_FLAT)
+                .withMetricType(MetricType.L2)
+                .withExtraParam("{\"nlist\":128}")
+                .withSyncMode(Boolean.FALSE)
+                .build();
+
+        R<RpcStatus> response = client.createIndex(vectorIndexParam);
+        if (response.getStatus() != 0) {
+            throw new RuntimeException("创建 user_memory vector 索引失败: " + response.getMessage());
+        }
+
+        // 为 user_id 创建标量索引（用于 expr 过滤）
+        // Milvus 2.5+ 支持对 VarChar 字段建 INVERTED 索引以加速过滤
+        CreateIndexParam scalarIndexParam = CreateIndexParam.newBuilder()
+                .withCollectionName(MilvusConstants.MEMORY_COLLECTION_NAME)
+                .withFieldName("user_id")
+                .withIndexType(IndexType.INVERTED)
+                .withSyncMode(Boolean.FALSE)
+                .build();
+
+        R<RpcStatus> scalarRsp = client.createIndex(scalarIndexParam);
+        if (scalarRsp.getStatus() != 0) {
+            logger.warn("创建 user_id scalar 索引时出现警告（非致命）: {}", scalarRsp.getMessage());
+        }
+
+        logger.info("成功为 user_memory 字段创建索引");
     }
 
     /**
