@@ -15,9 +15,11 @@
 ## 🚀 核心特性
 
 - ✅ **RAG 问答**: 向量检索 + 多轮对话 + 流式输出
-- ✅ **AIOps 运维**: 智能诊断 + 多 Agent 协作 + 自动报告
+- ✅ **AIOps 运维**: 智能诊断 + 多 Agent 协作 + 超时保护 + 兜底报告
 - ✅ **工具集成**: 文档检索、告警查询、日志分析、时间工具
-- ✅ **会话管理**: 上下文维护、历史管理、自动清理
+- ✅ **会话管理**: 上下文维护 + Redis/内存双模存储 + 自动降级恢复
+- ✅ **容错机制**: Resilience4j 断路器 + 限流 + 优雅降级
+- ✅ **文件管理**: 上传校验 + 大小/频率限制 + 降级重索引
 - ✅ **Web 界面**: 提供测试界面和 RESTful API
 
 
@@ -98,7 +100,8 @@ POST /api/ai_ops
 
 ### 4. 文件管理
 
-- `POST /api/upload` - 上传文件并自动向量化
+- `POST /api/upload` - 上传文件并自动向量化（限流：10次/分钟/IP，上限 20MB）
+- `POST /api/upload/reindex-failed` - 重索引降级文档（embedding 故障恢复后一键修复）
 - `GET /milvus/health` - Milvus 健康检查
 
 
@@ -131,6 +134,26 @@ document:
   chunk:
     max-size: 800
     overlap: 100
+
+# 容错与降级（v1.1.0 新增）
+resilience4j:
+  circuitbreaker:
+    instances:
+      dashscope-llm:        # LLM 断路器
+      dashscope-embedding:  # Embedding 断路器
+      milvus-search:        # Milvus 搜索断路器
+  ratelimiter:
+    instances:
+      file-upload:          # 上传限流: 10次/分钟
+        limit-for-period: 10
+        limit-refresh-period: 1m
+
+session:
+  redis:
+    fallback-to-memory: true  # Redis 故障时自动降级到内存
+
+aiops:
+  total-timeout-seconds: 300  # Agent 分析超时上限
 ```
 
 ### 环境变量
@@ -190,6 +213,17 @@ curl http://localhost:9900/milvus/health
 ```
 
 
-**版本**: v1.0.0  
+**版本**: v1.1.0  
 **作者**: chief  
 **许可证**: MIT
+
+## 📝 更新日志
+
+### v1.1.0 (2026-07-23)
+- 🔌 **Resilience4j 断路器**: DashScope LLM / Embedding / Milvus 搜索熔断保护
+- 🧠 **Redis 内存降级**: SessionManager 支持 Redis 故障时自动切换到 ConcurrentHashMap
+- ⏱️ **AIOps 超时保护**: Agent 分析超时后自动终止并生成兜底报告
+- 📁 **文件上传加固**: IP 级限流 (10次/分钟) + 20MB 大小限制 + 降级文档重索引端点
+
+### v1.0.0
+- 初始版本
