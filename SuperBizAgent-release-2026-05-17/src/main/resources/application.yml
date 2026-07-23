@@ -168,3 +168,4 @@ session:
       trigger-threshold: 10    # 消息对数超过此阈值触发摘要生成
       model: "qwen3-max"       # 生成摘要用的 LLM 模型
       max-summary-length: 500  # 摘要最大字符数
+    fallback-to-memory: true   # Redis 故障时自动降级到内存存储
