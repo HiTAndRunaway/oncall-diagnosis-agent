@@ -183,8 +183,18 @@ public class VectorIndexService {
                 // 生成向量
                 List<Float> vector = embeddingService.generateEmbedding(chunk.getContent());
 
+                // 检测零向量（embedding 断路器降级标记）
+                boolean needsReindex = vector.stream().allMatch(v -> v == 0.0f);
+
                 // 构建元数据（包含文件信息）
                 Map<String, Object> metadata = buildMetadata(path.toString(), chunk, chunks.size());
+
+                // 标记需要重新索引（embedding 降级时使用零向量）
+                if (needsReindex) {
+                    metadata.put("needsReindex", true);
+                    logger.warn("Embedding 降级：分片 {}/{} 使用零向量，已标记 needsReindex=true",
+                            chunk.getChunkIndex(), chunks.size());
+                }
 
                 // 插入到 Milvus
                 insertToMilvus(chunk.getContent(), vector, metadata, chunk.getChunkIndex());

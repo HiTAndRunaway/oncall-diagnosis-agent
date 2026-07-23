@@ -167,4 +167,18 @@ session:
       enabled: true            # 是否查询摘要层，false=跳过摘要直接查详情
       trigger-threshold: 10    # 消息对数超过此阈值触发摘要生成
       model: "qwen3-max"       # 生成摘要用的 LLM 模型
+
+# Resilience4j 断路器配置
+resilience4j:
+  circuitbreaker:
+    instances:
+      dashscope-embedding:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+
+# AIOps 超时保护
+aiops:
+  total-timeout-seconds: 300
       max-summary-length: 500  # 摘要最大字符数

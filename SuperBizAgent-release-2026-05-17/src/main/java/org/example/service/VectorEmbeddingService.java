@@ -7,6 +7,7 @@ import com.alibaba.dashscope.embeddings.TextEmbeddingOutput;
 import com.alibaba.dashscope.embeddings.TextEmbeddingResultItem;
 import com.alibaba.dashscope.exception.NoApiKeyException;
 import com.alibaba.dashscope.utils.Constants;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,6 +74,7 @@ public class VectorEmbeddingService {
      * @param content 文本内容
      * @return 向量嵌入（浮点数列表）
      */
+    @CircuitBreaker(name = "dashscope-embedding", fallbackMethod = "embedFallback")
     public List<Float> generateEmbedding(String content) {
         try {
             if (content == null || content.trim().isEmpty()) {
@@ -140,6 +142,21 @@ public class VectorEmbeddingService {
             floatEmbedding.add(value.floatValue());
         }
         return floatEmbedding;
+    }
+
+    /**
+     * 断路器降级方法：返回零向量并标记需要重新索引
+     */
+    @SuppressWarnings("unused")
+    private List<Float> embedFallback(String content, Throwable t) {
+        logger.warn("[CircuitBreaker] Embedding 降级 - 返回零向量，content前50字符: {}, error: {}",
+                content != null ? content.substring(0, Math.min(50, content.length())) : "null",
+                t.getMessage());
+        List<Float> zeroVector = new ArrayList<>(1024);
+        for (int i = 0; i < 1024; i++) {
+            zeroVector.add(0.0f);
+        }
+        return zeroVector;
     }
 
     /**
