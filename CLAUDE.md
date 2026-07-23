@@ -114,3 +114,17 @@ make stop && make down
 
 4.代码审查完后需要解决审查出来的问题，审查完后再次测试，没问题后提交并推送到远程分支（失败可以重试，重试5次，如果不成功就停止）
 
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues on `HiTAndRunaway/oncall-diagnosis-agent`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Uses the five canonical triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+

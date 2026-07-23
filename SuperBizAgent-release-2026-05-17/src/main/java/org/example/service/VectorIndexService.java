@@ -183,8 +183,18 @@ public class VectorIndexService {
                 // 生成向量
                 List<Float> vector = embeddingService.generateEmbedding(chunk.getContent());
 
+                // 检测零向量（embedding 断路器降级标记）
+                boolean needsReindex = vector.stream().allMatch(v -> v == 0.0f);
+
                 // 构建元数据（包含文件信息）
                 Map<String, Object> metadata = buildMetadata(path.toString(), chunk, chunks.size());
+
+                // 标记需要重新索引（embedding 降级时使用零向量）
+                if (needsReindex) {
+                    metadata.put("needsReindex", true);
+                    logger.warn("Embedding 降级：分片 {}/{} 使用零向量，已标记 needsReindex=true",
+                            chunk.getChunkIndex(), chunks.size());
+                }
 
                 // 插入到 Milvus
                 insertToMilvus(chunk.getContent(), vector, metadata, chunk.getChunkIndex());
@@ -198,6 +208,144 @@ public class VectorIndexService {
         }
 
         logger.info("文件索引完成: {}, 共 {} 个分片", filePath, chunks.size());
+    }
+
+    /**
+     * 重索引所有标记了 needsReindex=true 的文档
+     * 查询 Milvus → 逐条重新向量化 → Upsert 回 Milvus
+     *
+     * @return 重索引结果（total/success/failed/errors）
+     */
+    public ReindexResult reindexFailedDocuments() {
+        logger.info("开始重索引失败文档...");
+        ReindexResult result = new ReindexResult();
+
+        try {
+            // 1. 查询 needsReindex=true 的文档
+            io.milvus.param.dml.QueryParam queryParam = io.milvus.param.dml.QueryParam.newBuilder()
+                    .withCollectionName(org.example.constant.MilvusConstants.MILVUS_COLLECTION_NAME)
+                    .withExpr("metadata[\"needsReindex\"] == true")
+                    .withOutFields(java.util.Arrays.asList("id", "content", "vector"))
+                    .build();
+
+            io.milvus.param.R<io.milvus.grpc.QueryResults> queryResponse = milvusClient.query(queryParam);
+
+            if (queryResponse.getStatus() != 0) {
+                throw new RuntimeException("查询 needsReindex 文档失败: " + queryResponse.getMessage());
+            }
+
+            io.milvus.response.QueryResultsWrapper wrapper =
+                    new io.milvus.response.QueryResultsWrapper(queryResponse.getData());
+            java.util.List<io.milvus.response.QueryResultsWrapper.RowRecord> records = wrapper.getRowRecords();
+
+            result.total = records.size();
+
+            if (records.isEmpty()) {
+                logger.info("没有需要重索引的文档");
+                return result;
+            }
+
+            logger.info("找到 {} 个需要重索引的文档", result.total);
+
+            // 2. 逐条重新向量化并更新
+            for (io.milvus.response.QueryResultsWrapper.RowRecord record : records) {
+                String id = null;
+                String content = null;
+                try {
+                    id = String.valueOf(record.get("id"));
+                    content = String.valueOf(record.get("content"));
+
+                    if (content == null || content.isEmpty() || "null".equals(content)) {
+                        logger.warn("文档 {} 内容为空，跳过", id);
+                        result.failed++;
+                        result.errors.add("文档 " + id + ": 内容为空");
+                        continue;
+                    }
+
+                    java.util.List<Float> newVector = embeddingService.generateEmbedding(content);
+                    logger.info("文档 {} 重新向量化成功，维度: {}", id, newVector.size());
+
+                    // 构建 metadata（保持原有 metadata，更新 needsReindex=false）
+                    java.util.Map<String, Object> metadata = new java.util.HashMap<>();
+                    Object originalMetaObj = record.get("metadata");
+                    if (originalMetaObj != null) {
+                        try {
+                            com.google.gson.Gson gson = new com.google.gson.Gson();
+                            @SuppressWarnings("unchecked")
+                            java.util.Map<String, Object> originalMeta = gson.fromJson(
+                                    String.valueOf(originalMetaObj), java.util.Map.class);
+                            if (originalMeta != null) {
+                                metadata.putAll(originalMeta);
+                            }
+                        } catch (Exception e) {
+                            logger.warn("解析 metadata 失败: {}", e.getMessage());
+                        }
+                    }
+                    metadata.put("needsReindex", false);
+
+                    com.google.gson.Gson gson = new com.google.gson.Gson();
+                    com.google.gson.JsonObject metadataJson = gson.toJsonTree(metadata).getAsJsonObject();
+
+                    // 3. Upsert 回 Milvus
+                    java.util.List<io.milvus.param.dml.UpsertParam.Field> fields = new java.util.ArrayList<>();
+                    fields.add(new io.milvus.param.dml.UpsertParam.Field("id",
+                            java.util.Collections.singletonList(id)));
+                    fields.add(new io.milvus.param.dml.UpsertParam.Field("content",
+                            java.util.Collections.singletonList(content)));
+                    fields.add(new io.milvus.param.dml.UpsertParam.Field("vector",
+                            java.util.Collections.singletonList(newVector)));
+                    fields.add(new io.milvus.param.dml.UpsertParam.Field("metadata",
+                            java.util.Collections.singletonList(metadataJson)));
+
+                    io.milvus.param.dml.UpsertParam upsertParam = io.milvus.param.dml.UpsertParam.newBuilder()
+                            .withCollectionName(org.example.constant.MilvusConstants.MILVUS_COLLECTION_NAME)
+                            .withFields(fields)
+                            .build();
+
+                    io.milvus.param.R<io.milvus.grpc.MutationResult> upsertResponse = milvusClient.upsert(upsertParam);
+
+                    if (upsertResponse.getStatus() != 0) {
+                        throw new RuntimeException("Upsert 失败: " + upsertResponse.getMessage());
+                    }
+
+                    result.success++;
+                    logger.info("文档 {} 重索引成功 ({}/{})", id, result.success + result.failed, result.total);
+
+                } catch (Exception e) {
+                    result.failed++;
+                    result.errors.add("文档 " + (id != null ? id : "unknown") + ": " + e.getMessage());
+                    logger.error("重索引文档失败: {}", e.getMessage(), e);
+                }
+            }
+
+            logger.info("重索引完成: total={}, success={}, failed={}", result.total, result.success, result.failed);
+            return result;
+
+        } catch (Exception e) {
+            logger.error("重索引流程异常", e);
+            throw new RuntimeException("重索引失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 重索引结果
+     */
+    public static class ReindexResult {
+        public int total;
+        public int success;
+        public int failed;
+        public java.util.List<String> errors = new java.util.ArrayList<>();
+
+        public java.util.Map<String, Object> toMap() {
+            java.util.Map<String, Object> map = new java.util.LinkedHashMap<>();
+            map.put("total", total);
+            map.put("success", success);
+            map.put("failed", failed);
+            if (!errors.isEmpty()) {
+                map.put("errors", errors);
+            }
+            return map;
+        }
     }
 
     /**

@@ -1,5 +1,8 @@
 package org.example.controller;
 
+import io.github.resilience4j.ratelimiter.RateLimiter;
+import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
+import jakarta.servlet.http.HttpServletRequest;
 import org.example.config.FileUploadConfig;
 import org.example.dto.FileUploadRes;
 import org.example.service.VectorIndexService;
@@ -17,13 +20,15 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 
 @RestController
 public class FileUploadController {
 
     private static final Logger logger = LoggerFactory.getLogger(FileUploadController.class);
+    private static final com.google.gson.Gson GSON = new com.google.gson.Gson();
+
+    private static final long MAX_FILE_SIZE_BYTES = 20L * 1024 * 1024; // 20MB
 
     @Autowired
     private FileUploadConfig fileUploadConfig;
@@ -31,10 +36,29 @@ public class FileUploadController {
     @Autowired
     private VectorIndexService vectorIndexService;
 
+    @Autowired
+    private RateLimiterRegistry rateLimiterRegistry;
+
     @PostMapping(value = "/api/upload", consumes = "multipart/form-data")
-    public ResponseEntity<?> upload(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<?> upload(@RequestParam("file") MultipartFile file,
+                                    HttpServletRequest request) {
         if (file.isEmpty()) {
             return ResponseEntity.badRequest().body("文件不能为空");
+        }
+
+        // IP 级限流检查
+        String clientIp = getClientIp(request);
+        RateLimiter rateLimiter = rateLimiterRegistry.rateLimiter("file-upload", clientIp);
+        if (!rateLimiter.acquirePermission()) {
+            logger.warn("上传限流触发，IP: {}", clientIp);
+            return ResponseEntity.status(429)
+                    .body(Map.of("error", "上传过于频繁，请 1 分钟后再试"));
+        }
+
+        // 业务层文件大小校验
+        if (file.getSize() > MAX_FILE_SIZE_BYTES) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "文件大小不能超过 20MB"));
         }
 
         String originalFilename = file.getOriginalFilename();
@@ -100,6 +124,38 @@ public class FileUploadController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(errorResponse);
         }
+    }
+
+    /**
+     * 重索引失败文档端点
+     * 委托 VectorIndexService 查询并重新向量化 needsReindex=true 的文档
+     */
+    @PostMapping("/api/upload/reindex-failed")
+    public ResponseEntity<?> reindexFailed() {
+        try {
+            VectorIndexService.ReindexResult result = vectorIndexService.reindexFailedDocuments();
+            return ResponseEntity.ok(result.toMap());
+        } catch (Exception e) {
+            logger.error("重索引端点异常", e);
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "重索引失败: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * 获取客户端真实 IP
+     * 优先级: X-Forwarded-For > X-Real-IP > RemoteAddr
+     */
+    private String getClientIp(HttpServletRequest request) {
+        String xff = request.getHeader("X-Forwarded-For");
+        if (xff != null && !xff.isEmpty()) {
+            return xff.split(",")[0].trim();
+        }
+        String realIp = request.getHeader("X-Real-IP");
+        if (realIp != null && !realIp.isEmpty()) {
+            return realIp;
+        }
+        return request.getRemoteAddr();
     }
 
     /**

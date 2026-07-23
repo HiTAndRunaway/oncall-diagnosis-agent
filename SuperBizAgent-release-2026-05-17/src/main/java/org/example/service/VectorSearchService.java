@@ -24,6 +24,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -105,6 +107,7 @@ public class VectorSearchService {
      * @param topK  返回最相似的K个结果
      * @return 搜索结果列表
      */
+    @CircuitBreaker(name = "milvus-search", fallbackMethod = "searchFallback")
     public List<SearchResult> searchSimilarDocuments(String query, int topK) {
         try {
             int fetchCount = rerankEnabled ? recallCount : topK;
@@ -645,6 +648,15 @@ public class VectorSearchService {
     private static class RerankUsage {
         @JsonProperty("total_tokens")
         private int totalTokens;
+    }
+
+    /**
+     * Milvus 搜索断路器降级方法
+     * 当断路器打开或搜索异常时，返回空列表，使上层 hybridSearch 退化为纯 BM25 + 重排序
+     */
+    private List<SearchResult> searchFallback(String query, int topK, Throwable t) {
+        logger.warn("[CircuitBreaker] Milvus 搜索降级 - 返回空列表, query: {}, error: {}", query, t.getMessage());
+        return Collections.emptyList();
     }
 
     /**
