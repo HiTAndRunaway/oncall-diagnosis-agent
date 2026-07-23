@@ -170,6 +170,7 @@ session:
       model: "qwen3-max"       # 生成摘要用的 LLM 模型
       max-summary-length: 500  # 摘要最大字符数
 
+<<<<<<< HEAD
 # Resilience4j 断路器配置
 resilience4j:
   circuitbreaker:
@@ -182,4 +183,4 @@ resilience4j:
 
 # AIOps 超时保护
 aiops:
-  total-timeout-seconds: 300
+  total-timeout-seconds: 300  # Agent 分析总超时，默认 5 分钟

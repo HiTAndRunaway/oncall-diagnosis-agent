@@ -2,6 +2,7 @@ package org.example.service;
 
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
 import com.alibaba.cloud.ai.graph.OverAllState;
+import com.alibaba.cloud.ai.graph.OverAllStateBuilder;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.agent.flow.agent.SupervisorAgent;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
@@ -12,12 +13,22 @@ import org.example.agent.tool.QueryMetricsTools;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * AI Ops 智能运维服务
@@ -39,6 +50,9 @@ public class AiOpsService {
 
     @Autowired(required = false)  // Mock 模式下才注册
     private QueryLogsTools queryLogsTools;
+
+    @Value("${aiops.total-timeout-seconds:300}")
+    private int totalTimeoutSeconds;
 
     /**
      * 执行 AI Ops 告警分析流程
@@ -66,8 +80,32 @@ public class AiOpsService {
 
         String taskPrompt = "你是企业级 SRE，接到了自动化告警排查任务。请结合工具调用，执行**规划→执行→再规划**的闭环，并最终按照固定模板输出《告警分析报告》。禁止编造虚假数据，如连续多次查询失败需诚实反馈无法完成的原因。";
 
-        logger.info("调用 Supervisor Agent 开始编排...");
-        return supervisorAgent.invoke(taskPrompt);
+        logger.info("调用 Supervisor Agent 开始编排，超时限制: {} 秒", totalTimeoutSeconds);
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<Optional<OverAllState>> future = executor.submit(() -> {
+            try {
+                return supervisorAgent.invoke(taskPrompt);
+            } catch (GraphRunnerException e) {
+                logger.error("AIOps Agent 执行异常", e);
+                return Optional.empty();
+            }
+        });
+
+        try {
+            Optional<OverAllState> state = future.get(totalTimeoutSeconds, TimeUnit.SECONDS);
+            logger.info("AIOps Agent 编排正常完成");
+            return state;
+        } catch (TimeoutException e) {
+            logger.warn("[AIOps] 分析超时 ({} 秒)，强制终止并生成兜底报告", totalTimeoutSeconds);
+            future.cancel(true);
+            return forceFinalReport(chatModel, taskPrompt);
+        } catch (InterruptedException | ExecutionException e) {
+            logger.error("[AIOps] 分析执行异常，尝试生成兜底报告", e);
+            return forceFinalReport(chatModel, taskPrompt);
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     /**
@@ -90,6 +128,54 @@ public class AiOpsService {
             return Optional.of(reportText);
         } else {
             logger.warn("未能提取到 Planner 最终报告");
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * 生成超时/异常场景下的兜底报告
+     * 使用独立的 LLM 调用（不带工具），生成基于知识推断的报告
+     *
+     * @param chatModel    大模型实例
+     * @param originalInput 原始告警输入
+     * @return 包含兜底报告的 OverAllState
+     */
+    private Optional<OverAllState> forceFinalReport(DashScopeChatModel chatModel, String originalInput) {
+        try {
+            String forcePrompt = String.format("""
+                    你是一个企业级 SRE。之前的自动化分析流程因超时被中断。
+                    请基于以下原始告警信息，结合你的专业知识，生成一份简要的告警分析报告。
+
+                    原始告警信息：
+                    %s
+
+                    请按以下格式输出：
+                    # 告警分析报告（超时终止 - 基于知识推断）
+
+                    ---
+
+                    ## 告警概述
+
+                    ## 可能的根因分析（标注为"推断"而非确认）
+
+                    ## 建议的排查步骤
+
+                    ## 重要提醒
+                    本报告因自动化分析超时而基于专家知识推断生成，未经过完整的工具调用验证，建议人工介入排查。
+                    """, originalInput);
+
+            Prompt prompt = new Prompt(new UserMessage(forcePrompt));
+            ChatResponse response = chatModel.call(prompt);
+            String result = response.getResult().getOutput().getText();
+
+            logger.info("兜底报告生成成功，长度: {}", result != null ? result.length() : 0);
+
+            OverAllState state = OverAllStateBuilder.builder()
+                    .putData("planner_plan", new AssistantMessage(result))
+                    .build();
+            return Optional.of(state);
+        } catch (Exception e) {
+            logger.error("生成兜底报告失败", e);
             return Optional.empty();
         }
     }
