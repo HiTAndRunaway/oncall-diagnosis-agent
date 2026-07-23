@@ -163,10 +163,12 @@ memory:
 session:
   redis:
     ttl-hours: 24              # 会话过期时间（小时），0=永不过期，默认24
+    fallback-to-memory: true   # Redis 故障时自动降级到内存存储
     summary:
       enabled: true            # 是否查询摘要层，false=跳过摘要直接查详情
       trigger-threshold: 10    # 消息对数超过此阈值触发摘要生成
       model: "qwen3-max"       # 生成摘要用的 LLM 模型
+      max-summary-length: 500  # 摘要最大字符数
 
 # Resilience4j 断路器配置
 resilience4j:
@@ -181,5 +183,3 @@ resilience4j:
 # AIOps 超时保护
 aiops:
   total-timeout-seconds: 300
-      max-summary-length: 500  # 摘要最大字符数
-    fallback-to-memory: true   # Redis 故障时自动降级到内存存储
