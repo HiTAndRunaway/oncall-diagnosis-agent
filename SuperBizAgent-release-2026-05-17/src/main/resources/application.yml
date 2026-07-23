@@ -182,3 +182,4 @@ resilience4j:
 aiops:
   total-timeout-seconds: 300
       max-summary-length: 500  # 摘要最大字符数
+    fallback-to-memory: true   # Redis 故障时自动降级到内存存储

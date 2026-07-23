@@ -6,13 +6,19 @@ import org.example.config.SessionRedisProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * 会话管理器 — 基于 Redis 的三层会话存储
@@ -24,6 +30,9 @@ import java.util.concurrent.TimeUnit;
  *
  * 读取路径：摘要优先 → 详情回退 → 新会话
  * 写入路径：追加详情 → 更新元数据 → 刷新 TTL → 超阈值异步生成摘要
+ *
+ * 容错：Redis 不可用时自动降级到 ConcurrentHashMap 内存存储，
+ *       每次成功的 Redis 操作自动恢复标记。
  */
 @Service
 public class SessionManager {
@@ -56,6 +65,43 @@ public class SessionManager {
     @Autowired(required = false)
     private org.example.config.MemoryProperties memoryProperties;
 
+    // ==================== 容错：内存二级存储 ====================
+
+    /** 内存二级存储，key 格式与 Redis 完全一致 (session:{id}:summary/history/meta) */
+    private final ConcurrentHashMap<String, String> memoryStore = new ConcurrentHashMap<>();
+
+    /** Redis 可用标记，true=可用，false=已降级到内存 */
+    private final AtomicBoolean redisAvailable = new AtomicBoolean(true);
+
+    /**
+     * Redis 操作通用降级模板
+     * <p>
+     * 当 redisAvailable 为 false 时直接走内存操作；
+     * 当 redisAvailable 为 true 时先尝试 Redis，失败则降级并走内存。
+     * 每次成功的 Redis 操作自动将标记恢复为 true。
+     *
+     * @param key       操作对应的 Redis key
+     * @param redisOp   Redis 操作
+     * @param memoryOp  内存降级操作（接收 key 作为参数）
+     * @param <T>       返回值类型
+     * @return 操作结果
+     */
+    private <T> T withRedisFallback(String key, Supplier<T> redisOp,
+                                     Function<String, T> memoryOp) {
+        if (!redisAvailable.get()) {
+            return memoryOp.apply(key);
+        }
+        try {
+            T result = redisOp.get();
+            redisAvailable.set(true);
+            return result;
+        } catch (RedisConnectionFailureException | QueryTimeoutException e) {
+            logger.warn("[SessionManager] Redis 不可用，降级到内存存储 (key={}): {}", key, e.getMessage());
+            redisAvailable.set(false);
+            return memoryOp.apply(key);
+        }
+    }
+
     // ==================== 公共 API ====================
 
     /**
@@ -67,14 +113,18 @@ public class SessionManager {
      */
     public SessionContext getOrCreateSession(String sessionId) {
         if (sessionId == null || sessionId.isEmpty()) {
-            sessionId = UUID.randomUUID().toString();
-            logger.info("生成新会话ID: {}", sessionId);
-            return new SessionContext(sessionId, Collections.emptyList(), null);
+            String newId = UUID.randomUUID().toString();
+            logger.info("生成新会话ID: {}", newId);
+            return new SessionContext(newId, Collections.emptyList(), null);
         }
+
+        final String effectiveSessionId = sessionId;
 
         // 1. 如果启用了摘要，先查摘要层
         if (props.getSummary().isEnabled()) {
-            String summaryJson = redisTemplate.opsForValue().get(summaryKey(sessionId));
+            String summaryJson = withRedisFallback(summaryKey(effectiveSessionId),
+                    () -> redisTemplate.opsForValue().get(summaryKey(effectiveSessionId)),
+                    k -> memoryStore.get(k));
             if (summaryJson != null && !summaryJson.isEmpty()) {
                 try {
                     SummaryData summary = redisObjectMapper.readValue(summaryJson, SummaryData.class);
@@ -93,7 +143,9 @@ public class SessionManager {
         }
 
         // 2. 摘要未命中或关闭，查详情层
-        String historyJson = redisTemplate.opsForValue().get(historyKey(sessionId));
+        String historyJson = withRedisFallback(historyKey(effectiveSessionId),
+                () -> redisTemplate.opsForValue().get(historyKey(effectiveSessionId)),
+                k -> memoryStore.get(k));
         if (historyJson != null && !historyJson.isEmpty()) {
             try {
                 @SuppressWarnings("unchecked")
@@ -132,8 +184,10 @@ public class SessionManager {
         String historyKey = historyKey(sessionId);
         String metaKey = metaKey(sessionId);
 
-        // 1. 从 Redis 读取现有历史
-        String existingJson = redisTemplate.opsForValue().get(historyKey);
+        // 1. 从 Redis（或内存降级）读取现有历史
+        String existingJson = withRedisFallback(historyKey,
+                () -> redisTemplate.opsForValue().get(historyKey),
+                k -> memoryStore.get(k));
         List<Map<String, String>> history;
         try {
             if (existingJson != null && !existingJson.isEmpty()) {
@@ -166,7 +220,7 @@ public class SessionManager {
             }
         }
 
-        // 4. 序列化并写回 Redis
+        // 4. 序列化并写回 Redis（或内存降级）
         try {
             String historyJson = redisObjectMapper.writeValueAsString(history);
             writeWithTTL(historyKey, historyJson);
@@ -212,11 +266,20 @@ public class SessionManager {
             return;
         }
 
-        redisTemplate.delete(Arrays.asList(
-                summaryKey(sessionId),
-                historyKey(sessionId),
-                metaKey(sessionId)
-        ));
+        try {
+            redisTemplate.delete(Arrays.asList(
+                    summaryKey(sessionId),
+                    historyKey(sessionId),
+                    metaKey(sessionId)
+            ));
+        } catch (RedisConnectionFailureException | QueryTimeoutException e) {
+            logger.warn("[SessionManager] Redis 不可用，使用内存删除 (sessionId={}): {}", sessionId, e.getMessage());
+        }
+
+        // 同时清理内存存储
+        memoryStore.remove(summaryKey(sessionId));
+        memoryStore.remove(historyKey(sessionId));
+        memoryStore.remove(metaKey(sessionId));
 
         logger.info("已清空会话 - SessionId: {}", sessionId);
     }
@@ -228,7 +291,10 @@ public class SessionManager {
         if (sessionId == null || sessionId.isEmpty()) {
             return false;
         }
-        Boolean exists = redisTemplate.hasKey(historyKey(sessionId));
+        String key = historyKey(sessionId);
+        Boolean exists = withRedisFallback(key,
+                () -> redisTemplate.hasKey(key),
+                k -> memoryStore.containsKey(k));
         return Boolean.TRUE.equals(exists);
     }
 
@@ -241,7 +307,9 @@ public class SessionManager {
         if (sessionId == null || sessionId.isEmpty()) {
             return Collections.emptyList();
         }
-        String historyJson = redisTemplate.opsForValue().get(historyKey(sessionId));
+        String historyJson = withRedisFallback(historyKey(sessionId),
+                () -> redisTemplate.opsForValue().get(historyKey(sessionId)),
+                k -> memoryStore.get(k));
         if (historyJson == null || historyJson.isEmpty()) {
             return Collections.emptyList();
         }
@@ -261,7 +329,9 @@ public class SessionManager {
             return null;
         }
 
-        String metaJson = redisTemplate.opsForValue().get(metaKey(sessionId));
+        String metaJson = withRedisFallback(metaKey(sessionId),
+                () -> redisTemplate.opsForValue().get(metaKey(sessionId)),
+                k -> memoryStore.get(k));
         if (metaJson == null || metaJson.isEmpty()) {
             return null;
         }
@@ -281,7 +351,9 @@ public class SessionManager {
      */
     @SuppressWarnings("unchecked")
     List<Map<String, String>> getFullHistory(String sessionId) {
-        String historyJson = redisTemplate.opsForValue().get(historyKey(sessionId));
+        String historyJson = withRedisFallback(historyKey(sessionId),
+                () -> redisTemplate.opsForValue().get(historyKey(sessionId)),
+                k -> memoryStore.get(k));
         if (historyJson == null || historyJson.isEmpty()) {
             return Collections.emptyList();
         }
@@ -309,20 +381,35 @@ public class SessionManager {
 
     /**
      * 尝试获取摘要生成分布式锁（SETNX）
+     * <p>
+     * Redis 不可用时返回 true，允许本地执行（降级模式下无分布式竞争风险）。
+     *
      * @return true 表示获取锁成功
      */
     boolean tryAcquireSummaryLock(String sessionId) {
         String lockKey = summaryLockKey(sessionId);
-        Boolean success = redisTemplate.opsForValue()
-                .setIfAbsent(lockKey, "1", Duration.ofSeconds(60));
-        return Boolean.TRUE.equals(success);
+        try {
+            Boolean success = redisTemplate.opsForValue()
+                    .setIfAbsent(lockKey, "1", Duration.ofSeconds(60));
+            return Boolean.TRUE.equals(success);
+        } catch (RedisConnectionFailureException | QueryTimeoutException e) {
+            logger.warn("[SessionManager] Redis 不可用，无法获取分布式锁，允许本地执行 (key={}): {}",
+                    lockKey, e.getMessage());
+            return true;
+        }
     }
 
     /**
      * 释放摘要生成分布式锁
      */
     void releaseSummaryLock(String sessionId) {
-        redisTemplate.delete(summaryLockKey(sessionId));
+        try {
+            redisTemplate.delete(summaryLockKey(sessionId));
+        } catch (RedisConnectionFailureException | QueryTimeoutException e) {
+            logger.warn("[SessionManager] Redis 不可用，释放锁失败 (key={}): {}",
+                    summaryLockKey(sessionId), e.getMessage());
+            // swallow — 内存模式下无分布式锁
+        }
     }
 
     // ==================== 内部方法 ====================
@@ -356,23 +443,45 @@ public class SessionManager {
         }
     }
 
+    /**
+     * 刷新会话所有 key 的 TTL
+     * <p>
+     * Redis 不可用时静默忽略（内存模式无 TTL）。
+     */
     private void refreshTTL(String sessionId) {
         Duration ttl = getTTLDuration();
         if (ttl == null) {
             return; // TTL=0，不设过期
         }
-        redisTemplate.expire(summaryKey(sessionId), ttl);
-        redisTemplate.expire(historyKey(sessionId), ttl);
-        redisTemplate.expire(metaKey(sessionId), ttl);
+        try {
+            redisTemplate.expire(summaryKey(sessionId), ttl);
+            redisTemplate.expire(historyKey(sessionId), ttl);
+            redisTemplate.expire(metaKey(sessionId), ttl);
+        } catch (RedisConnectionFailureException | QueryTimeoutException e) {
+            logger.warn("[SessionManager] Redis 不可用，跳过 TTL 刷新 (sessionId={}): {}",
+                    sessionId, e.getMessage());
+            // swallow — 内存模式无 TTL
+        }
     }
 
+    /**
+     * 带 TTL 写入 Redis（或内存降级存储）
+     */
     private void writeWithTTL(String key, String value) {
         Duration ttl = getTTLDuration();
-        if (ttl != null) {
-            redisTemplate.opsForValue().set(key, value, ttl);
-        } else {
-            redisTemplate.opsForValue().set(key, value);
-        }
+        withRedisFallback(key,
+                () -> {
+                    if (ttl != null) {
+                        redisTemplate.opsForValue().set(key, value, ttl);
+                    } else {
+                        redisTemplate.opsForValue().set(key, value);
+                    }
+                    return null;
+                },
+                k -> {
+                    memoryStore.put(k, value);
+                    return null;
+                });
     }
 
     private Duration getTTLDuration() {
