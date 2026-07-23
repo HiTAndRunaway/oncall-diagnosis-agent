@@ -5,6 +5,7 @@ import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.example.agent.tool.DateTimeTools;
 import org.example.agent.tool.DecomposeQuestionTool;
 import org.example.agent.tool.EvaluateSearchResultsTool;
@@ -274,6 +275,7 @@ public class ChatService {
      * @param question 用户问题
      * @return AI 回复
      */
+    @CircuitBreaker(name = "dashscope-llm", fallbackMethod = "chatFallback")
     public String executeChat(ReactAgent agent, String question) throws GraphRunnerException {
         // 重置 Agentic RAG 检索轮次计数器
         agenticRagGuard.reset();
@@ -282,6 +284,16 @@ public class ChatService {
         String answer = response.getText();
         logger.info("ReactAgent 对话完成，答案长度: {}", answer.length());
         return answer;
+    }
+
+    /**
+     * LLM 断路器降级方法
+     * 当 DashScope LLM 调用失败或断路器打开时，返回友好错误提示
+     */
+    private String chatFallback(ReactAgent agent, String question, Throwable t) {
+        logger.warn("[CircuitBreaker] LLM 服务降级 - question前50字符: {}, error: {}",
+            question.substring(0, Math.min(50, question.length())), t.getMessage());
+        return "AI 服务暂时不可用，请稍后重试。系统已自动熔断保护，预计 30 秒后恢复。";
     }
 
     /**
