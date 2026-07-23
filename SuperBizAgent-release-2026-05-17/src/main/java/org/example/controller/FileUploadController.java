@@ -1,18 +1,10 @@
 package org.example.controller;
 
-import io.milvus.client.MilvusServiceClient;
-import io.milvus.grpc.QueryResults;
-import io.milvus.param.R;
-import io.milvus.param.dml.QueryParam;
-import io.milvus.param.dml.UpsertParam;
-import io.milvus.response.QueryResultsWrapper;
 import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
 import org.example.config.FileUploadConfig;
-import org.example.constant.MilvusConstants;
 import org.example.dto.FileUploadRes;
-import org.example.service.VectorEmbeddingService;
 import org.example.service.VectorIndexService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +26,7 @@ import java.util.*;
 public class FileUploadController {
 
     private static final Logger logger = LoggerFactory.getLogger(FileUploadController.class);
+    private static final com.google.gson.Gson GSON = new com.google.gson.Gson();
 
     private static final long MAX_FILE_SIZE_BYTES = 20L * 1024 * 1024; // 20MB
 
@@ -45,12 +38,6 @@ public class FileUploadController {
 
     @Autowired
     private RateLimiterRegistry rateLimiterRegistry;
-
-    @Autowired
-    private MilvusServiceClient milvusClient;
-
-    @Autowired
-    private VectorEmbeddingService embeddingService;
 
     @PostMapping(value = "/api/upload", consumes = "multipart/form-data")
     public ResponseEntity<?> upload(@RequestParam("file") MultipartFile file,
@@ -141,117 +128,13 @@ public class FileUploadController {
 
     /**
      * 重索引失败文档端点
-     * 查询 Milvus 中标记为 needsReindex=true 的文档，逐条重新向量化
+     * 委托 VectorIndexService 查询并重新向量化 needsReindex=true 的文档
      */
     @PostMapping("/api/upload/reindex-failed")
     public ResponseEntity<?> reindexFailed() {
-        logger.info("开始重索引失败文档...");
-
         try {
-            QueryParam queryParam = QueryParam.newBuilder()
-                    .withCollectionName(MilvusConstants.MILVUS_COLLECTION_NAME)
-                    .withExpr("metadata[\"needsReindex\"] == true")
-                    .withOutFields(Arrays.asList("id", "content", "vector"))
-                    .build();
-
-            R<QueryResults> queryResponse = milvusClient.query(queryParam);
-
-            if (queryResponse.getStatus() != 0) {
-                logger.error("查询 needsReindex 文档失败: {}", queryResponse.getMessage());
-                return ResponseEntity.status(500)
-                        .body(Map.of("error", "查询失败: " + queryResponse.getMessage()));
-            }
-
-            QueryResultsWrapper wrapper = new QueryResultsWrapper(queryResponse.getData());
-            List<QueryResultsWrapper.RowRecord> records = wrapper.getRowRecords();
-
-            if (records.isEmpty()) {
-                logger.info("没有需要重索引的文档");
-                return ResponseEntity.ok(Map.of("total", 0, "success", 0, "failed", 0));
-            }
-
-            int total = records.size();
-            int success = 0;
-            int failed = 0;
-            List<String> errors = new ArrayList<>();
-
-            logger.info("找到 {} 个需要重索引的文档", total);
-
-            for (QueryResultsWrapper.RowRecord record : records) {
-                String id = null;
-                String content = null;
-                try {
-                    id = String.valueOf(record.get("id"));
-                    content = String.valueOf(record.get("content"));
-
-                    if (content == null || content.isEmpty() || "null".equals(content)) {
-                        logger.warn("文档 {} 内容为空，跳过", id);
-                        failed++;
-                        errors.add("文档 " + id + ": 内容为空");
-                        continue;
-                    }
-
-                    List<Float> newVector = embeddingService.generateEmbedding(content);
-                    logger.info("文档 {} 重新向量化成功，维度: {}", id, newVector.size());
-
-                    Map<String, Object> metadata = new HashMap<>();
-                    Object originalMetaObj = record.get("metadata");
-                    if (originalMetaObj != null) {
-                        try {
-                            com.google.gson.Gson gson = new com.google.gson.Gson();
-                            @SuppressWarnings("unchecked")
-                            Map<String, Object> originalMeta = gson.fromJson(
-                                    String.valueOf(originalMetaObj), Map.class);
-                            if (originalMeta != null) {
-                                metadata.putAll(originalMeta);
-                            }
-                        } catch (Exception e) {
-                            logger.warn("解析 metadata 失败: {}", e.getMessage());
-                        }
-                    }
-                    metadata.put("needsReindex", false);
-
-                    com.google.gson.Gson gson = new com.google.gson.Gson();
-                    com.google.gson.JsonObject metadataJson = gson.toJsonTree(metadata).getAsJsonObject();
-
-                    List<UpsertParam.Field> fields = new ArrayList<>();
-                    fields.add(new UpsertParam.Field("id", Collections.singletonList(id)));
-                    fields.add(new UpsertParam.Field("content", Collections.singletonList(content)));
-                    fields.add(new UpsertParam.Field("vector", Collections.singletonList(newVector)));
-                    fields.add(new UpsertParam.Field("metadata", Collections.singletonList(metadataJson)));
-
-                    UpsertParam upsertParam = UpsertParam.newBuilder()
-                            .withCollectionName(MilvusConstants.MILVUS_COLLECTION_NAME)
-                            .withFields(fields)
-                            .build();
-
-                    R<io.milvus.grpc.MutationResult> upsertResponse = milvusClient.upsert(upsertParam);
-
-                    if (upsertResponse.getStatus() != 0) {
-                        throw new RuntimeException("Upsert 失败: " + upsertResponse.getMessage());
-                    }
-
-                    success++;
-                    logger.info("文档 {} 重索引成功 ({}/{})", id, success + failed, total);
-
-                } catch (Exception e) {
-                    failed++;
-                    errors.add("文档 " + (id != null ? id : "unknown") + ": " + e.getMessage());
-                    logger.error("重索引文档失败: {}", e.getMessage(), e);
-                }
-            }
-
-            Map<String, Object> result = new LinkedHashMap<>();
-            result.put("total", total);
-            result.put("success", success);
-            result.put("failed", failed);
-            if (!errors.isEmpty()) {
-                result.put("errors", errors);
-            }
-
-            logger.info("重索引完成: total={}, success={}, failed={}", total, success, failed);
-            return ResponseEntity.ok(result);
-
+            VectorIndexService.ReindexResult result = vectorIndexService.reindexFailedDocuments();
+            return ResponseEntity.ok(result.toMap());
         } catch (Exception e) {
             logger.error("重索引端点异常", e);
             return ResponseEntity.status(500)
