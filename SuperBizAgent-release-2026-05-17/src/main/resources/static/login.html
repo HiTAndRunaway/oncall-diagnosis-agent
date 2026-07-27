@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SuperBizAgent — 登录</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="login.css">
+</head>
+<body>
+<div class="login-container">
+    <div class="login-card">
+        <div class="login-header">
+            <h1 class="login-title">SuperBizAgent</h1>
+            <p class="login-subtitle">OnCall Diagnosis Platform</p>
+        </div>
+        <form id="loginForm" class="login-form">
+            <div class="form-group">
+                <label for="apiKeyInput" class="form-label">API Key</label>
+                <input type="password" id="apiKeyInput" class="form-input" placeholder="请输入您的 API Key" autocomplete="off">
+            </div>
+            <div id="loginError" class="login-error" style="display:none"></div>
+            <button type="submit" class="login-submit-btn" id="loginSubmitBtn">
+                <span>进入控制台</span>
+            </button>
+        </form>
+        <p class="login-hint">没有 API Key？联系管理员</p>
+    </div>
+</div>
+<script src="login.js"></script>
+</body>
+</html>
