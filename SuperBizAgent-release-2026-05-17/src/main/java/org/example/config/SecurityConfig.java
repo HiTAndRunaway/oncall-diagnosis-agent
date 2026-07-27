@@ -10,6 +10,9 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 /**
  * Spring Security 配置
@@ -42,6 +45,7 @@ public class SecurityConfig {
 
         // 安全开关开启：启用 API Key 认证
         http
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -65,5 +69,21 @@ public class SecurityConfig {
                         }));
 
         return http.build();
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+        ApiKeyProperties.CorsConfig corsConfig = apiKeyProperties.getCors();
+        if (corsConfig != null) {
+            config.setAllowedOrigins(corsConfig.getAllowedOrigins());
+            config.setAllowedMethods(corsConfig.getAllowedMethods());
+            config.setAllowedHeaders(corsConfig.getAllowedHeaders());
+            config.setAllowCredentials(corsConfig.isAllowCredentials());
+            config.setMaxAge(corsConfig.getMaxAge());
+        }
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return source;
     }
 }

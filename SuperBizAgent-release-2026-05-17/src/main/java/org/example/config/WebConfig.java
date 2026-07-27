@@ -2,6 +2,8 @@ package org.example.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.interceptor.LogInterceptor;
+import org.example.security.RateLimitInterceptor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.converter.HttpMessageConverter;
@@ -19,6 +21,12 @@ import java.util.List;
  */
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
+
+    @Autowired
+    private RateLimitInterceptor rateLimitInterceptor;
+
+    @Autowired
+    private RateLimitConfig rateLimitConfig;
 
     @Override
     public void configureMessageConverters(List<HttpMessageConverter<?>> converters) {
@@ -42,6 +50,13 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new LogInterceptor())
                 .addPathPatterns("/api/**");
+
+        // 限流开关启用时才注册限流拦截器
+        if (rateLimitConfig.isEnabled()) {
+            registry.addInterceptor(rateLimitInterceptor)
+                    .addPathPatterns("/api/**");
+        }
+
         WebMvcConfigurer.super.addInterceptors(registry);
     }
 }

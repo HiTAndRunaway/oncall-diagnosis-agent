@@ -27,7 +27,7 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<LoginResult>> login(@RequestBody LoginRequest request) {
         if (request.getApiKey() == null || request.getApiKey().isEmpty()) {
-            return ResponseEntity.ok(ApiResponse.error("API Key is required"));
+            return ResponseEntity.status(401).body(ApiResponse.error(401, "API Key is required"));
         }
 
         ApiKeyProperties.ApiKeyEntry entry = apiKeyProperties.lookup(request.getApiKey());
