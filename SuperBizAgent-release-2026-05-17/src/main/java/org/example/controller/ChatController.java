@@ -170,8 +170,10 @@ public class ChatController {
             return emitter;
         }
 
+        // 在主线程捕获 userId，避免 SecurityContext（THREADLOCAL）在 executor 线程中丢失
+        String userId = getCurrentUserId();
+
         executor.execute(() -> {
-            String userId = getCurrentUserId();
             RecallMemoryTool.setCurrentUserId(userId);
             try {
                 logger.info("收到 ReactAgent 对话请求 - SessionId: {}, Question: {}", request.getId(), request.getQuestion());

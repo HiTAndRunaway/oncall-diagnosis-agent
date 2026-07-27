@@ -53,7 +53,7 @@ public class ForgetMemoryTool {
         int deleted = 0;
         for (MemoryManager.MemoryResult match : matches) {
             if (match.getScore() > memoryProperties.getSearch().getScoreThreshold()) {
-                if (memoryManager.deleteMemory(match.getId())) {
+                if (memoryManager.deleteMemory(userId, match.getId())) {
                     deleted++;
                 }
             }

@@ -274,12 +274,12 @@ public class MemoryManager {
     }
 
     /**
-     * 删除单条记忆
+     * 删除单条记忆（需验证 userId 所有权）
      */
-    public boolean deleteMemory(String memoryId) {
+    public boolean deleteMemory(String userId, String memoryId) {
         DeleteParam deleteParam = DeleteParam.newBuilder()
                 .withCollectionName(MilvusConstants.MEMORY_COLLECTION_NAME)
-                .withExpr("id == \"" + memoryId + "\"")
+                .withExpr("user_id == \"" + userId + "\" && id == \"" + memoryId + "\"")
                 .build();
 
         R<MutationResult> response = milvusClient.delete(deleteParam);

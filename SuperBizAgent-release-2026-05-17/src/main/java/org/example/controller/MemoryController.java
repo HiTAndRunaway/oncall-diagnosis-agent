@@ -78,7 +78,7 @@ public class MemoryController {
         String userId = getCurrentUserId();
         logger.info("删除记忆 - userId={}, memoryId={}", userId, memoryId);
 
-        boolean success = memoryManager.deleteMemory(memoryId);
+        boolean success = memoryManager.deleteMemory(userId, memoryId);
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("success", success);

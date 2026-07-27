@@ -213,10 +213,7 @@ superbiz:
   security:
     enabled: false                           # 全局安全开关，false=放行所有请求
     api-key-header: X-API-Key                # API Key 请求头名称
-    api-keys:                                # 预配置的 API Key 列表
-      - key: "default-api-key-change-me"
-        user-id: "admin"
-        description: "Default admin API key"
+    api-keys: []                             # 预配置的 API Key 列表（生产环境必须通过环境变量注入）
     cors:                                    # CORS 配置（仅 security.enabled=true 时生效）
       allow-credentials: false
       allowed-origins: []

@@ -2,3 +2,7 @@
 superbiz:
   security:
     enabled: false
+    api-keys:
+      - key: "dev-api-key-change-me"
+        user-id: "admin"
+        description: "Development-only API key (example)"

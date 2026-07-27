@@ -1,7 +1,9 @@
 package org.example.config;
 
+import org.example.security.ApiKeyAuthManager;
 import org.example.security.ApiKeyAuthenticationFilter;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -20,10 +22,8 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
  */
 @Configuration
 @EnableWebSecurity
+@ConditionalOnProperty(prefix = "superbiz.security", name = "enabled", havingValue = "true")
 public class SecurityConfig {
-
-    @Autowired
-    private ApiKeyAuthenticationFilter apiKeyAuthenticationFilter;
 
     @Autowired
     private ApiKeyProperties apiKeyProperties;
@@ -35,7 +35,9 @@ public class SecurityConfig {
     };
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http,
+                                                    ApiKeyAuthenticationFilter apiKeyAuthenticationFilter)
+            throws Exception {
         // 安全开关关闭：放行所有请求，禁用 CSRF
         if (!apiKeyProperties.isEnabled()) {
             http.authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
@@ -85,5 +87,11 @@ public class SecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
         return source;
+    }
+
+    @Bean
+    public ApiKeyAuthenticationFilter apiKeyAuthenticationFilter(ApiKeyAuthManager apiKeyAuthManager,
+                                                                  ApiKeyProperties apiKeyProperties) {
+        return new ApiKeyAuthenticationFilter(apiKeyAuthManager, apiKeyProperties);
     }
 }
