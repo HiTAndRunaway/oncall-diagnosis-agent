@@ -205,3 +205,34 @@ resilience4j:
 # AIOps 超时保护
 aiops:
   total-timeout-seconds: 300  # Agent 分析总超时，默认 5 分钟
+
+# ==================== Security & Authentication ====================
+
+# API Key 认证配置
+superbiz:
+  security:
+    enabled: false                           # 全局安全开关，false=放行所有请求
+    api-key-header: X-API-Key                # API Key 请求头名称
+    api-keys:                                # 预配置的 API Key 列表
+      - key: "default-api-key-change-me"
+        user-id: "admin"
+        description: "Default admin API key"
+    cors:                                    # CORS 配置（仅 security.enabled=true 时生效）
+      allow-credentials: false
+      allowed-origins: []
+      allowed-methods: []
+      allowed-headers: []
+      max-age: 3600
+
+  # 请求限流配置
+  rate-limit:
+    enabled: false                           # 限流总开关
+    default-capacity: 100                    # 默认令牌桶容量
+    default-refill-rate: 10                  # 默认每分钟补充令牌数
+    endpoints:                               # 按端点路径的限流规则
+      /api/chat:
+        capacity: 30
+        refill-rate: 5
+      /api/chat_stream:
+        capacity: 10
+        refill-rate: 2

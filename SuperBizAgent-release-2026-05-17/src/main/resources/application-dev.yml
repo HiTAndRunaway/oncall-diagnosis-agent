@@ -1,0 +1,4 @@
+# Development profile: security disabled
+superbiz:
+  security:
+    enabled: false
