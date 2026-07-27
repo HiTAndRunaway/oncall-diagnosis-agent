@@ -6,6 +6,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -28,9 +30,9 @@ public class MemoryController {
      * 获取用户所有记忆面板数据（按类型分组）
      */
     @GetMapping("/panel")
-    public ResponseEntity<Map<String, Object>> getMemoryPanel(
-            @RequestParam("userId") String userId) {
+    public ResponseEntity<Map<String, Object>> getMemoryPanel() {
 
+        String userId = getCurrentUserId();
         logger.info("获取记忆面板 - userId={}", userId);
 
         if (userId == null || userId.isEmpty()) {
@@ -70,9 +72,9 @@ public class MemoryController {
      */
     @DeleteMapping("/{memoryId}")
     public ResponseEntity<Map<String, Object>> deleteMemory(
-            @PathVariable("memoryId") String memoryId,
-            @RequestParam("userId") String userId) {
+            @PathVariable("memoryId") String memoryId) {
 
+        String userId = getCurrentUserId();
         logger.info("删除记忆 - userId={}, memoryId={}", userId, memoryId);
 
         boolean success = memoryManager.deleteMemory(memoryId);
@@ -88,9 +90,9 @@ public class MemoryController {
      * 清空用户所有记忆
      */
     @DeleteMapping("/clear")
-    public ResponseEntity<Map<String, Object>> clearMemories(
-            @RequestParam("userId") String userId) {
+    public ResponseEntity<Map<String, Object>> clearMemories() {
 
+        String userId = getCurrentUserId();
         logger.info("清空记忆 - userId={}", userId);
 
         long deleted = memoryManager.deleteAllMemories(userId);
@@ -101,6 +103,15 @@ public class MemoryController {
         response.put("deletedCount", deleted);
 
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 从 SecurityContext 获取当前用户 ID
+     * 安全关闭时返回 "anonymous" 以保持向后兼容
+     */
+    private String getCurrentUserId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return (auth != null && auth.isAuthenticated()) ? auth.getName() : "anonymous";
     }
 
     private List<Map<String, Object>> formatForFrontend(List<MemoryManager.MemoryResult> memories) {
