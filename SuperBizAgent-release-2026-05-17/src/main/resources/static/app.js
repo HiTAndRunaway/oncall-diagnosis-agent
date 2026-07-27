@@ -593,6 +593,30 @@ class SuperBizAgentApp {
         return 'session_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
     }
 
+    // 获取存储的 API Key
+    getApiKey() {
+        return localStorage.getItem('sbiz_api_key') || '';
+    }
+
+    // 带认证的 fetch 封装，自动添加 X-API-Key 头并处理 401/429
+    async authFetch(url, options = {}) {
+        const headers = {
+            ...(options.headers || {}),
+            'X-API-Key': this.getApiKey()
+        };
+        const response = await fetch(url, { ...options, headers });
+
+        if (response.status === 401) {
+            localStorage.removeItem('sbiz_api_key');
+            window.location.href = '/login.html';
+            throw new Error('未授权，请重新登录');
+        }
+        if (response.status === 429) {
+            this.showNotification('请求太频繁，请稍后再试', 'warning');
+        }
+        return response;
+    }
+
     // 发送消息
     async sendMessage() {
         let message = '';
@@ -649,15 +673,14 @@ class SuperBizAgentApp {
         const loadingMessage = this.addLoadingMessage('正在思考...');
 
         try {
-            const response = await fetch(`${this.apiBaseUrl}/chat`, {
+            const response = await this.authFetch(`${this.apiBaseUrl}/chat`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
                     Id: this.sessionId,
-                    Question: message,
-                    UserId: this.getUserId()
+                    Question: message
                 })
             });
 
@@ -712,15 +735,14 @@ class SuperBizAgentApp {
     // 发送流式消息
     async sendStreamMessage(message) {
         try {
-            const response = await fetch(`${this.apiBaseUrl}/chat_stream`, {
+            const response = await this.authFetch(`${this.apiBaseUrl}/chat_stream`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
                     Id: this.sessionId,
-                    Question: message,
-                    UserId: this.getUserId()
+                    Question: message
                 })
             });
 
@@ -1114,7 +1136,7 @@ class SuperBizAgentApp {
             formData.append('file', file);
 
             // 发送上传请求
-            const response = await fetch(`${this.apiBaseUrl}/upload`, {
+            const response = await this.authFetch(`${this.apiBaseUrl}/upload`, {
                 method: 'POST',
                 body: formData
             });
@@ -1159,7 +1181,7 @@ class SuperBizAgentApp {
     // 发送智能运维请求（SSE 流式模式）
     async sendAIOpsRequest(loadingMessageElement) {
         try {
-            const response = await fetch(`${this.apiBaseUrl}/ai_ops`, {
+            const response = await this.authFetch(`${this.apiBaseUrl}/ai_ops`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1574,15 +1596,6 @@ class SuperBizAgentApp {
 
     // ===== 记忆面板方法 =====
 
-    getUserId() {
-        let userId = localStorage.getItem('sbiz_user_id');
-        if (!userId) {
-            userId = 'u_' + crypto.randomUUID();
-            localStorage.setItem('sbiz_user_id', userId);
-        }
-        return userId;
-    },
-
     async toggleMemoryPanel() {
         if (this.memoryPanel.style.display === 'none' || !this.memoryPanel.style.display) {
             this.memoryPanel.style.display = 'block';
@@ -1594,8 +1607,7 @@ class SuperBizAgentApp {
 
     async loadMemoryPanel() {
         try {
-            const userId = this.getUserId();
-            const resp = await fetch(`/api/memory/panel?userId=${encodeURIComponent(userId)}`);
+            const resp = await this.authFetch('/api/memory/panel');
             const data = await resp.json();
             if (!data.success) return;
 
@@ -1669,8 +1681,7 @@ class SuperBizAgentApp {
     async deleteMemory(memoryId) {
         if (!confirm('确定要删除这条记忆吗？')) return;
         try {
-            const userId = this.getUserId();
-            const resp = await fetch(`/api/memory/${encodeURIComponent(memoryId)}?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
+            const resp = await this.authFetch(`/api/memory/${encodeURIComponent(memoryId)}`, { method: 'DELETE' });
             const data = await resp.json();
             if (data.success) {
                 await this.loadMemoryPanel();

@@ -12,6 +12,11 @@
     <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/es/highlight.min.js"></script>
 </head>
 <body>
+<script>
+  if (!localStorage.getItem('sbiz_api_key')) {
+    window.location.href = '/login.html';
+  }
+</script>
 <div class="app-layout">
 
     <!-- Activity Bar -->

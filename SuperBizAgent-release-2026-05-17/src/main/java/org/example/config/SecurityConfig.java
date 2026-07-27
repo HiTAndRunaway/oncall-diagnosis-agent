@@ -1,0 +1,97 @@
+package org.example.config;
+
+import org.example.security.ApiKeyAuthManager;
+import org.example.security.ApiKeyAuthenticationFilter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+/**
+ * Spring Security 配置
+ * 安全开关 disabled 时放行所有请求；enabled 时启用 API Key 认证 + 白名单 + 401/403 JSON 响应
+ */
+@Configuration
+@EnableWebSecurity
+@ConditionalOnProperty(prefix = "superbiz.security", name = "enabled", havingValue = "true")
+public class SecurityConfig {
+
+    @Autowired
+    private ApiKeyProperties apiKeyProperties;
+
+    /** 无需认证的路径白名单 */
+    private static final String[] WHITELIST = {
+            "/api/login", "/login.html", "/login.js", "/login.css",
+            "/actuator/health", "/milvus/health", "/favicon.ico"
+    };
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http,
+                                                    ApiKeyAuthenticationFilter apiKeyAuthenticationFilter)
+            throws Exception {
+        // 安全开关关闭：放行所有请求，禁用 CSRF
+        if (!apiKeyProperties.isEnabled()) {
+            http.authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+            http.csrf(AbstractHttpConfigurer::disable);
+            return http.build();
+        }
+
+        // 安全开关开启：启用 API Key 认证
+        http
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(WHITELIST).permitAll()
+                        .anyRequest().authenticated())
+                .addFilterBefore(apiKeyAuthenticationFilter,
+                        UsernamePasswordAuthenticationFilter.class)
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint((request, response, authException) -> {
+                            response.setStatus(401);
+                            response.setContentType("application/json;charset=UTF-8");
+                            response.getWriter().write(
+                                    "{\"code\":401,\"message\":\"Unauthorized\"}");
+                        })
+                        .accessDeniedHandler((request, response, accessDeniedException) -> {
+                            response.setStatus(403);
+                            response.setContentType("application/json;charset=UTF-8");
+                            response.getWriter().write(
+                                    "{\"code\":403,\"message\":\"Forbidden\"}");
+                        }));
+
+        return http.build();
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+        ApiKeyProperties.CorsConfig corsConfig = apiKeyProperties.getCors();
+        if (corsConfig != null) {
+            config.setAllowedOrigins(corsConfig.getAllowedOrigins());
+            config.setAllowedMethods(corsConfig.getAllowedMethods());
+            config.setAllowedHeaders(corsConfig.getAllowedHeaders());
+            config.setAllowCredentials(corsConfig.isAllowCredentials());
+            config.setMaxAge(corsConfig.getMaxAge());
+        }
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return source;
+    }
+
+    @Bean
+    public ApiKeyAuthenticationFilter apiKeyAuthenticationFilter(ApiKeyAuthManager apiKeyAuthManager,
+                                                                  ApiKeyProperties apiKeyProperties) {
+        return new ApiKeyAuthenticationFilter(apiKeyAuthManager, apiKeyProperties);
+    }
+}

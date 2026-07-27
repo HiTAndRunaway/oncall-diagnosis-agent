@@ -1,0 +1,20 @@
+# Production profile: security enabled
+superbiz:
+  security:
+    enabled: true
+    api-keys: []
+      # 生产环境 API Keys 必须通过环境变量 spring.config.import 或外部配置注入
+      # 示例: SUPERBIZ_SECURITY_API_KEYS_0_KEY=xxx SUPERBIZ_SECURITY_API_KEYS_0_USER_ID=admin
+    cors:
+      allowed-origins:
+        - "https://your-domain.com"
+      allowed-methods:
+        - "GET"
+        - "POST"
+        - "PUT"
+        - "DELETE"
+        - "OPTIONS"
+      allowed-headers:
+        - "*"
+  rate-limit:
+    enabled: true

@@ -21,6 +21,9 @@ import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
@@ -69,8 +72,8 @@ public class ChatController {
                 return ResponseEntity.ok(ApiResponse.success(ChatResponse.error("问题内容不能为空")));
             }
 
-            // 设置记忆工具当前 userId
-            String userId = request.getUserId();
+            // 从 SecurityContext 获取当前用户 ID
+            String userId = getCurrentUserId();
             RecallMemoryTool.setCurrentUserId(userId);
             try {
 
@@ -167,8 +170,10 @@ public class ChatController {
             return emitter;
         }
 
+        // 在主线程捕获 userId，避免 SecurityContext（THREADLOCAL）在 executor 线程中丢失
+        String userId = getCurrentUserId();
+
         executor.execute(() -> {
-            String userId = request.getUserId();
             RecallMemoryTool.setCurrentUserId(userId);
             try {
                 logger.info("收到 ReactAgent 对话请求 - SessionId: {}, Question: {}", request.getId(), request.getQuestion());
@@ -432,6 +437,18 @@ public class ChatController {
     // ==================== 内部类 ====================
 
     /**
+     * 从 SecurityContext 获取当前用户 ID
+     * 安全关闭时返回 "anonymous" 以保持向后兼容
+     */
+    private String getCurrentUserId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.isAuthenticated() && !(auth instanceof AnonymousAuthenticationToken)) {
+            return auth.getName();
+        }
+        return "anonymous";
+    }
+
+    /**
      * 聊天请求
      */
     @Setter
@@ -444,10 +461,6 @@ public class ChatController {
         @com.fasterxml.jackson.annotation.JsonProperty(value = "Question")
         @com.fasterxml.jackson.annotation.JsonAlias({"question", "QUESTION"})
         private String Question;
-
-        @com.fasterxml.jackson.annotation.JsonProperty(value = "UserId")
-        @com.fasterxml.jackson.annotation.JsonAlias({"userId", "user_id", "USERID"})
-        private String UserId;
     }
 
     /**
