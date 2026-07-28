@@ -202,9 +202,14 @@ resilience4j:
         limit-refresh-period: 1m
         timeout-duration: 0ms
 
-# AIOps 超时保护
+# AIOps 超时保护与质量评估
 aiops:
   total-timeout-seconds: 300  # Agent 分析总超时，默认 5 分钟
+  eval:
+    enabled: true             # 是否启用 LLM-as-Judge 报告质量评估
+    model: qwen-turbo         # 评估用 LLM 模型（轻量级）
+    min-pass-score: 12        # 报告质量最低通过分数（满分 20）
+    sample-rate: 1.0          # 采样率（0.0-1.0），1.0 = 全部评估
 
 # ==================== Security & Authentication ====================
 

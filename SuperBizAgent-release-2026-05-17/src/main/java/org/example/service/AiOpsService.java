@@ -6,6 +6,7 @@ import com.alibaba.cloud.ai.graph.OverAllStateBuilder;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.agent.flow.agent.SupervisorAgent;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
+import org.example.agent.eval.AIOpsEvaluator;
 import org.example.agent.tool.DateTimeTools;
 import org.example.agent.tool.InternalDocsTools;
 import org.example.agent.tool.QueryLogsTools;
@@ -23,6 +24,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -50,6 +52,9 @@ public class AiOpsService {
 
     @Autowired(required = false)  // Mock 模式下才注册
     private QueryLogsTools queryLogsTools;
+
+    @Autowired(required = false)
+    private AIOpsEvaluator aiOpsEvaluator;
 
     @Value("${aiops.total-timeout-seconds:300}")
     private int totalTimeoutSeconds;
@@ -95,6 +100,10 @@ public class AiOpsService {
         try {
             Optional<OverAllState> state = future.get(totalTimeoutSeconds, TimeUnit.SECONDS);
             logger.info("AIOps Agent 编排正常完成");
+
+            // Fire-and-forget quality evaluation (never blocks the return)
+            evaluateReportAsync(state);
+
             return state;
         } catch (TimeoutException e) {
             logger.warn("[AIOps] 分析超时 ({} 秒)，强制终止并生成兜底报告", totalTimeoutSeconds);
@@ -130,6 +139,36 @@ public class AiOpsService {
             logger.warn("未能提取到 Planner 最终报告");
             return Optional.empty();
         }
+    }
+
+    /**
+     * Fire-and-forget async evaluation of the AIOps report.
+     * Never blocks the main flow — logs warnings on failure.
+     *
+     * @param stateOptional the AIOps execution state
+     */
+    private void evaluateReportAsync(Optional<OverAllState> stateOptional) {
+        if (aiOpsEvaluator == null) {
+            logger.debug("[AIOps] AIOpsEvaluator not available — skipping evaluation");
+            return;
+        }
+        if (stateOptional.isEmpty()) {
+            return;
+        }
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                OverAllState state = stateOptional.get();
+                Optional<String> reportOpt = extractFinalReport(state);
+                if (reportOpt.isPresent()) {
+                    aiOpsEvaluator.evaluateAsync(null, reportOpt.get());
+                } else {
+                    logger.debug("[AIOps] No report text extracted — skipping evaluation");
+                }
+            } catch (Exception e) {
+                logger.warn("[AIOps] Evaluation fire-and-forget failed: {}", e.getMessage());
+            }
+        });
     }
 
     /**
