@@ -1,27 +1,48 @@
 # SuperBizAgent
 
-> 基于 Spring Boot + AI Agent 的智能问答与运维系统
+> 基于 Spring Boot + AI Agent 的企业级智能问答与运维平台
 
 ## 📖 项目简介
 
-企业级智能业务代理系统，包含两大核心模块：
+企业级智能业务代理系统，包含三大核心子系统：
 
 ### 1. RAG 智能问答
-集成 Milvus 向量数据库和阿里云 DashScope，提供基于检索增强生成的智能问答能力，支持多轮对话和流式输出。
+集成 Milvus 向量数据库和阿里云 DashScope，支持多策略分块、查询改写、混合检索、Agentic RAG，提供高质量的检索增强生成问答。
 
 ### 2. AIOps 智能运维
-基于 AI Agent 的自动化运维系统，采用 Planner-Executor-Replanner 架构，实现告警分析、日志查询、智能诊断和报告生成。
+基于 SupervisorAgent（Planner-Executor-Replanner）的多 Agent 协作系统，实现告警分析、日志查询、根因诊断和报告生成。内置意图路由、LLM-as-Judge 质量评估和 10 场景回归测试用例集。
+
+### 3. 长期记忆（Mem0 风格）
+自动从对话中提取用户画像和行为偏好，支持向量检索、冲突检测、衰减淘汰，注入到 System Prompt 实现个性化对话。
 
 ## 🚀 核心特性
 
-- ✅ **RAG 问答**: 向量检索 + 多轮对话 + 流式输出
-- ✅ **AIOps 运维**: 智能诊断 + 多 Agent 协作 + 超时保护 + 兜底报告
-- ✅ **工具集成**: 文档检索、告警查询、日志分析、时间工具
-- ✅ **会话管理**: 上下文维护 + Redis/内存双模存储 + 自动降级恢复
-- ✅ **容错机制**: Resilience4j 断路器 + 限流 + 优雅降级
-- ✅ **文件管理**: 上传校验 + 大小/频率限制 + 降级重索引
-- ✅ **Web 界面**: 提供测试界面和 RESTful API
+### 智能对话
+- ✅ **RAG 问答**: 向量检索 + 混合召回（BM25 + 向量） + Rerank 重排序 + 流式输出
+- ✅ **查询改写**: 4 种策略（prompt_rewrite / hypothetical_answer / detail_abstract / direct）+ Redis 缓存
+- ✅ **Agentic RAG**: 多轮检索、问题拆解、结果评估、自动降级
+- ✅ **多策略分块**: heading / fixed-size / semantic / parent-child，支持按扩展名覆盖
 
+### AIOps 运维
+- ✅ **意图路由**: 基于 qwen-turbo 自动分类请求（告警排查 / 知识检索 / 通用对话），按意图分发到不同 Agent 管道
+- ✅ **多 Agent 协作**: SupervisorAgent → Planner → Executor → Replanner 闭环
+- ✅ **超时保护**: 可配置超时自动终止 + 基于 LLM 的兜底报告生成
+- ✅ **质量评估**: LLM-as-Judge 在线评分（根因准确性 / 证据充分性 / 结构完整性 / 可操作性）
+- ✅ **回归测试**: 10 场景测试用例集（含预期根因 + mock 数据）
+
+### 安全与稳定性
+- ✅ **API Key 认证**: 请求头验证 + SecurityContext 传递 + 匿名用户隔离
+- ✅ **令牌桶限流**: Bucket4j + Caffeine，按端点独立配置
+- ✅ **断路器保护**: Resilience4j（DashScope LLM / Embedding / Milvus 搜索）
+- ✅ **文件上传加固**: IP 级限流 + 大小校验 + 降级文档重索引
+
+### 会话与存储
+- ✅ **Redis + 内存双模**: 会话持久化，故障自动降级到 ConcurrentHashMap
+- ✅ **摘要压缩**: 消息对超阈值自动生成摘要，减少上下文窗口压力
+- ✅ **长期记忆**: 自动提取画像/偏好 → 向量存储 → 冲突检测 → 衰减淘汰
+
+### 前端
+- ✅ **Web 界面**: Gemini 风格单页应用，Markdown 渲染 + 代码高亮 + SSE 流式展示
 
 ## 🛠️ 技术栈
 
@@ -29,85 +50,175 @@
 |------|------|------|
 | Java | 17 | 开发语言 |
 | Spring Boot | 3.2.0 | 应用框架 |
-| Spring AI | - | AI Agent 框架 |
-| DashScope | 2.17.0 | 阿里云 AI 服务 |
-| Milvus | 2.6.10 | 向量数据库 |
+| Spring AI Alibaba | 1.1.0.0-RC2 | AI Agent 框架（DashScope + SupervisorAgent） |
+| DashScope SDK | 2.17.0 | 阿里云 AI 服务（LLM + Embedding + Rerank） |
+| Milvus SDK | 2.6.10 | 向量数据库客户端 |
+| Resilience4j | 2.2.0 | 断路器 + 限流 |
+| Bucket4j | 8.10.1 | 令牌桶限流 |
+| PDFBox | 3.0.3 | PDF 文本提取 |
+| Lombok | 1.18.30 | 代码生成 |
 
-## 📦 核心模块
+## 📦 项目结构
 
 ```
 SuperBizAgent/
 ├── src/main/java/org/example/
-│   ├── controller/
-│   │   └── ChatController.java        # 统一接口控制器 ⭐
-│   ├── service/
-│   │   ├── ChatService.java           # 对话服务 ⭐
-│   │   ├── AiOpsService.java          # AIOps 服务 ⭐
-│   │   ├── RagService.java            # RAG 服务
-│   │   └── Vector*.java               # 向量服务
-│   ├── agent/tool/                    # Agent 工具集
-│   │   ├── DateTimeTools.java         # 时间工具
-│   │   ├── InternalDocsTools.java     # 文档检索
-│   │   ├── QueryMetricsTools.java     # 告警查询
-│   │   └── QueryLogsTools.java        # 日志查询
-│   └── config/                        # 配置类
+│   ├── Main.java                         # 应用入口
+│   ├── controller/                       # 控制器层
+│   │   ├── ChatController.java           # 统一对话接口（同步 + SSE 流式）⭐
+│   │   ├── AuthController.java           # API Key 登录认证
+│   │   ├── MemoryController.java         # 长期记忆管理
+│   │   ├── FileUploadController.java     # 文件上传 + 向量化
+│   │   └── MilvusCheckController.java    # 健康检查
+│   ├── service/                          # 服务层
+│   │   ├── ChatService.java              # Agent 工厂 + 对话执行 ⭐
+│   │   ├── AiOpsService.java             # AIOps 多 Agent 编排 ⭐
+│   │   ├── RagService.java               # RAG 问答服务
+│   │   ├── SessionManager.java           # 会话管理（Redis + 内存）⭐
+│   │   ├── SummaryGenerator.java         # 对话摘要生成
+│   │   ├── MemoryManager.java            # 长期记忆管理
+│   │   ├── MemoryExtractor.java          # 记忆提取
+│   │   ├── MemorySearchService.java      # 记忆向量搜索
+│   │   ├── MemoryDecayService.java       # 记忆衰减淘汰
+│   │   ├── VectorIndexService.java       # 文档向量化索引
+│   │   ├── VectorSearchService.java      # 向量相似度搜索
+│   │   ├── VectorEmbeddingService.java   # DashScope Embedding
+│   │   ├── DocumentChunkService.java     # 文档分块
+│   │   ├── DashScopeLlmClient.java       # LLM 调用客户端
+│   │   ├── AgenticRagGuard.java          # Agentic RAG 守护
+│   │   ├── chunk/                        # 分块策略
+│   │   │   ├── HeadingChunkStrategy.java
+│   │   │   ├── FixedSizeChunkStrategy.java
+│   │   │   ├── SemanticBoundaryStrategy.java
+│   │   │   └── ParentChildStrategy.java
+│   │   ├── rewrite/                      # 查询改写策略
+│   │   │   ├── PromptRewriteStrategy.java
+│   │   │   ├── HypotheticalAnswerStrategy.java
+│   │   │   ├── DetailAbstractStrategy.java
+│   │   │   └── DirectStrategy.java
+│   │   └── parser/                       # 文档解析
+│   │       ├── TextDocumentParser.java
+│   │       └── PdfDocumentParser.java
+│   ├── agent/                            # Agent 模块
+│   │   ├── tool/                         # Agent 工具集
+│   │   │   ├── DateTimeTools.java        # 当前时间
+│   │   │   ├── InternalDocsTools.java    # 内部文档检索
+│   │   │   ├── QueryMetricsTools.java    # Prometheus 告警查询
+│   │   │   ├── QueryLogsTools.java       # 日志查询（mock 模式）
+│   │   │   ├── RecallMemoryTool.java     # 长期记忆召回
+│   │   │   ├── ForgetMemoryTool.java     # 遗忘记忆
+│   │   │   ├── SearchKnowledgeBaseTool.java  # 知识库搜索
+│   │   │   ├── DecomposeQuestionTool.java    # 问题拆解
+│   │   │   ├── EvaluateSearchResultsTool.java # 搜索结果评估
+│   │   │   ├── RefineQueryTool.java      # 查询精炼
+│   │   │   └── GetSearchCapabilitiesTool.java # 搜索能力查询
+│   │   ├── router/                       # 意图识别路由 🆕
+│   │   │   ├── IntentRouter.java         # qwen-turbo 意图分类
+│   │   │   ├── IntentCategory.java       # 意图枚举
+│   │   │   └── IntentResult.java         # 路由结果 DTO
+│   │   ├── eval/                         # LLM-as-Judge 评估 🆕
+│   │   │   ├── AIOpsEvaluator.java       # 在线质量评估
+│   │   │   ├── AIOpsEvalResult.java      # 评估结果 DTO
+│   │   │   ├── EvalDimension.java        # 评估维度枚举
+│   │   │   ├── TestCaseLoader.java       # 测试用例加载器
+│   │   │   └── TestCaseMeta.java         # 用例元数据 DTO
+│   │   └── mock/                         # Mock 数据注入 🆕
+│   │       └── MockDataProvider.java     # 测试用 mock 数据源
+│   ├── security/                         # 安全模块 🆕
+│   │   ├── ApiKeyAuthenticationFilter.java
+│   │   ├── ApiKeyAuthenticationToken.java
+│   │   ├── ApiKeyAuthManager.java
+│   │   └── RateLimitInterceptor.java
+│   ├── config/                           # 配置类
+│   │   ├── SecurityConfig.java           # Spring Security 配置
+│   │   ├── ApiKeyProperties.java         # API Key 配置属性
+│   │   ├── RateLimitConfig.java          # 限流配置
+│   │   ├── RedisConfig.java              # Redis 配置
+│   │   ├── MilvusConfig.java             # Milvus 配置
+│   │   ├── WebConfig.java / WebMvcConfig.java  # Web 配置
+│   │   ├── AsyncConfig.java              # 异步任务配置
+│   │   └── ...                           # 其他属性/配置类
+│   ├── dto/                              # 数据传输对象
+│   ├── interceptor/                      # 拦截器
+│   └── constant/                         # 常量
 ├── src/main/resources/
-│   ├── static/                        # Web 界面
-│   └── application.yml                # 应用配置
-└── aiops-docs/                        # 运维文档库
+│   ├── static/                           # Web 前端（SPA）
+│   │   ├── index.html                    # Gemini 风格界面
+│   │   ├── app.js                        # 前端逻辑（SSE + Markdown）
+│   │   └── styles.css                    # Material 风格样式
+│   └── application.yml                   # 应用配置 ⭐
+├── src/test/                             # 测试 🆕
+│   ├── java/org/example/
+│   │   └── AIOpsQualitySmokeTest.java    # 上下文加载冒烟测试
+│   └── resources/
+│       ├── application-test.yml          # 测试环境配置
+│       └── test-cases/                   # 测试用例 fixtures
+├── aiops-test-cases/                     # AIOps 回归测试用例集 🆕
+│   ├── cpu_high_usage.md                 # 10 个场景定义（YAML frontmatter）
+│   ├── memory_high_usage.md
+│   ├── disk_high_usage.md
+│   ├── service_unavailable.md
+│   ├── slow_response.md
+│   ├── db_connection_pool_full.md
+│   ├── mq_consumer_lag.md
+│   ├── k8s_pod_crashloop.md
+│   ├── ssl_cert_expiring.md
+│   ├── api_timeout_cascade.md
+│   └── mock-data/                        # 每场景对应的 mock 数据 JSON
+├── aiops-docs/                           # 运维知识库（RAG 文档源）
+├── docs/superpowers/specs/               # 设计文档
+│   ├── 2026-07-04-session-redis-migration-design.md
+│   ├── 2026-07-09-query-rewrite-design.md
+│   ├── 2026-07-27-security-auth-design.md
+│   └── 2026-07-28-aiops-agent-quality-design.md
+├── session/                              # 会话级产出（方案 / 测试报告）
+├── vector-database.yml                   # Docker Compose（Milvus + etcd + MinIO）
+├── Makefile                              # 一键启动脚本
+└── pom.xml
 ```
 
+## 📡 API 接口
 
-## 📡 核心接口
+### 对话接口
 
-### 1. 智能问答接口
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/chat` | 同步对话（支持意图路由 + 工具调用 + 多轮对话） |
+| POST | `/api/chat_stream` | SSE 流式对话（推荐，实时输出） |
+| POST | `/api/ai_ops` | AIOps 告警分析（SSE 流式，SupervisorAgent 编排） |
 
-**流式对话（推荐）**
-```bash
-POST /api/chat_stream
-Content-Type: application/json
+所有对话接口均内置 **意图路由**：自动识别告警排查、知识检索、通用对话三类请求，分发到对应的 Agent 管道。
 
-{
-  "Id": "session-123",
-  "Question": "什么是向量数据库？"
-}
-```
-支持 SSE 流式输出、自动工具调用、多轮对话。
+### 会话管理
 
-**普通对话**
-```bash
-POST /api/chat
-Content-Type: application/json
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/chat/clear` | 清空会话历史 |
+| GET  | `/api/chat/session/{sessionId}` | 获取会话详情（含摘要） |
 
-{
-  "Id": "session-123",
-  "Question": "什么是向量数据库？"
-}
-```
-一次性返回完整结果，支持工具调用和多轮对话。
+### 认证与安全 🆕
 
-### 2. AIOps 智能运维接口
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/login` | API Key 登录（返回 userId） |
 
-```bash
-POST /api/ai_ops
-```
-自动执行告警分析流程，生成运维报告（SSE 流式输出）。
+### 文件管理
 
-### 3. 会话管理
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/upload` | 上传文件并自动向量化（限流：10次/分钟，上限 20MB） |
+| POST | `/api/upload/reindex-failed` | 重索引降级文档 |
+| GET  | `/milvus/health` | Milvus 连接健康检查 |
 
-- `POST /api/chat/clear` - 清空会话历史
-- `GET /api/chat/session/{sessionId}` - 获取会话信息
+### 长期记忆 🆕
 
-### 4. 文件管理
-
-- `POST /api/upload` - 上传文件并自动向量化（限流：10次/分钟/IP，上限 20MB）
-- `POST /api/upload/reindex-failed` - 重索引降级文档（embedding 故障恢复后一键修复）
-- `GET /milvus/health` - Milvus 健康检查
-
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/memory/extract` | 手动触发记忆提取 |
+| GET  | `/api/memory/search` | 搜索用户记忆 |
+| DELETE | `/api/memory/{memoryId}` | 删除指定记忆 |
 
 ## ⚙️ 核心配置
-
-### application.yml
 
 ```yaml
 server:
@@ -122,46 +233,103 @@ milvus:
 spring:
   ai:
     dashscope:
-      api-key: "${DASHSCOPE_API_KEY}" // 环境变量
+      api-key: ${DASHSCOPE_API_KEY}
+    mcp:
+      client:
+        sse:
+          connections:
+            tencent-cls:              # 腾讯云 CLS MCP 日志查询
 
 # RAG 配置
 rag:
   top-k: 3
-  model: "qwen3-max"
+  model: qwen3-max
+  rerank:                              # Rerank 重排序
+    enabled: true
+    model: gte-rerank-v2
+  hybrid:                              # 混合召回（BM25 + 向量）
+    enabled: true
+  rewrite:                             # 查询改写
+    strategy: direct
+    model: qwen-turbo
+  agentic:                             # Agentic RAG
+    enabled: false
+    max-search-rounds: 3
 
-# 文档分片
+# 文档分块策略
 document:
   chunk:
-    max-size: 800
-    overlap: 100
+    strategy:
+      default-strategy: heading        # heading | fixed-size | semantic | parent-child
+      extension-overrides:
+        txt: fixed-size
 
-# 容错与降级（v1.1.0 新增）
+# 会话 Redis 存储
+session:
+  redis:
+    ttl-hours: 24
+    fallback-to-memory: true           # Redis 故障自动降级
+    summary:
+      enabled: true
+      trigger-threshold: 10
+
+# 长期记忆（Mem0 风格）
+memory:
+  enabled: true
+  extraction:
+    trigger-message-count: 6
+    model: qwen-turbo
+  search:
+    top-k: 5
+    score-threshold: 0.6
+  decay:
+    cron: "0 3 * * *"                  # 每天凌晨 3 点衰减
+    decay-factor: 0.1
+    min-confidence: 0.3
+
+# AIOps
+aiops:
+  total-timeout-seconds: 300           # 分析超时上限
+  eval:                                # LLM-as-Judge 评估
+    enabled: true
+    model: qwen-turbo
+    min-pass-score: 12
+    sample-rate: 1.0
+
+# 意图路由
+intent:
+  router:
+    enabled: true
+    model: qwen-turbo
+    confidence-threshold: 0.85
+
+# 安全认证
+superbiz:
+  security:
+    enabled: false                     # 全局安全开关
+  rate-limit:
+    enabled: false                     # 限流开关
+    endpoints:
+      /api/chat:        { capacity: 30, refill-rate: 5 }
+      /api/chat_stream: { capacity: 10, refill-rate: 2 }
+
+# 断路器
 resilience4j:
   circuitbreaker:
     instances:
-      dashscope-llm:        # LLM 断路器
-      dashscope-embedding:  # Embedding 断路器
-      milvus-search:        # Milvus 搜索断路器
+      dashscope-llm:        # LLM 调用熔断
+      dashscope-embedding:  # Embedding 调用熔断
+      milvus-search:        # Milvus 搜索熔断
   ratelimiter:
     instances:
       file-upload:          # 上传限流: 10次/分钟
-        limit-for-period: 10
-        limit-refresh-period: 1m
-
-session:
-  redis:
-    fallback-to-memory: true  # Redis 故障时自动降级到内存
-
-aiops:
-  total-timeout-seconds: 300  # Agent 分析超时上限
 ```
 
 ### 环境变量
 
 ```bash
-export DASHSCOPE_API_KEY=your-api-key
+export DASHSCOPE_API_KEY=your-api-key   # 必需
 ```
-
 
 ## 🚀 快速开始
 
@@ -174,56 +342,92 @@ export DASHSCOPE_API_KEY=your-api-key
 
 ### 2. 启动应用
 
-方法一： 手动启动
+**方式一：一键启动**
 ```bash
-1.先启动向量数据库
-docker compose up -d -f vector-database.yml
+make init     # 启动 Docker（Milvus + etcd + MinIO）→ 启动应用 → 上传运维文档
+```
 
-2.启动服务
+**方式二：分步启动**
+```bash
+make up       # 启动 Milvus 等依赖服务
+make start    # 后台启动应用（日志输出到 server.log）
+make stop     # 停止应用
+make down     # 停止所有 Docker 服务
+```
+
+**方式三：手动启动**
+```bash
+docker compose -f vector-database.yml up -d
 mvn clean install
 mvn spring-boot:run
 ```
 
-方法二：一键启动
+### 3. 访问
+
+```
+Web 界面:  http://localhost:9900
+Attu 管理: http://localhost:8000
+```
+
+### 4. 命令行示例
+
 ```bash
-make init  # 会自动启动向量数据库并上传运维文档到向量库
-```
-
-
-### 3. 使用示例
-
-**Web 界面**
-```
-http://localhost:9900
-```
-
-**命令行**
-```bash
-# 上传文档
-curl -X POST http://localhost:9900/api/upload \
-  -F "file=@document.txt"
-
-# 智能问答
+# 智能问答（自动路由到 RAG）
 curl -X POST http://localhost:9900/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"Id":"test","Question":"什么是向量数据库？"}'
+  -d '{"Id":"test01","Question":"数据库连接池满了怎么处理？"}'
+
+# 告警排查（自动路由到 AIOps）
+curl -X POST http://localhost:9900/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"Id":"test02","Question":"CPU 飙到 95% 了，帮我分析一下"}'
+
+# 流式对话
+curl -X POST http://localhost:9900/api/chat_stream \
+  -H "Content-Type: application/json" \
+  -d '{"Id":"test03","Question":"介绍一下 RAG 的原理"}'
+
+# 上传文档
+curl -X POST http://localhost:9900/api/upload \
+  -F "file=@document.pdf"
 
 # 健康检查
 curl http://localhost:9900/milvus/health
 ```
 
+## 🧪 测试
 
-**版本**: v1.1.0  
+```bash
+# 运行所有测试
+mvn test
+
+# 编译验证
+mvn clean compile
+```
+
+---
+
+**版本**: v1.2.0  
 **作者**: chief  
 **许可证**: MIT
 
 ## 📝 更新日志
 
+### v1.2.0 (2026-07-28)
+- 🧭 **意图识别路由**: 基于 qwen-turbo 自动分类请求意图，分发到 AIOps / RAG / 通用对话管道
+- 🎯 **LLM-as-Judge 评估**: AIOps 输出在线质量评分（根因准确性 / 证据充分性 / 结构完整性 / 可操作性）
+- 🧪 **AIOps 测试用例集**: 10 场景回归测试（含预期根因 + mock 数据）
+- 🔐 **安全认证**: API Key 认证 + Bucket4j 令牌桶限流 + SecurityContext 用户隔离
+- 🧠 **长期记忆**: Mem0 风格记忆提取、向量搜索、冲突检测、衰减淘汰
+- 🔍 **RAG 增强**: 混合召回（BM25 + 向量）、Rerank 重排序、Agentic RAG、查询改写
+- 📝 **会话增强**: Redis 持久化 + 摘要压缩 + 内存降级
+- ✂️ **多策略分块**: heading / fixed-size / semantic / parent-child
+
 ### v1.1.0 (2026-07-23)
-- 🔌 **Resilience4j 断路器**: DashScope LLM / Embedding / Milvus 搜索熔断保护
-- 🧠 **Redis 内存降级**: SessionManager 支持 Redis 故障时自动切换到 ConcurrentHashMap
-- ⏱️ **AIOps 超时保护**: Agent 分析超时后自动终止并生成兜底报告
-- 📁 **文件上传加固**: IP 级限流 (10次/分钟) + 20MB 大小限制 + 降级文档重索引端点
+- 🔌 Resilience4j 断路器（LLM / Embedding / Milvus）
+- 🧠 Redis 内存降级（SessionManager 自动切换）
+- ⏱️ AIOps 超时保护 + 兜底报告
+- 📁 文件上传加固（IP 限流 + 大小限制 + 重索引）
 
 ### v1.0.0
-- 初始版本
+- 初始版本：RAG 问答 + AIOps 运维 + Web 界面
