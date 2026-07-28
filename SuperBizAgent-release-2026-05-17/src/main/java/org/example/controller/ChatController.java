@@ -91,30 +91,30 @@ public class ChatController {
             RecallMemoryTool.setCurrentUserId(userId);
             try {
 
-            // 获取或创建会话
-            SessionManager.SessionContext ctx = sessionManager.getOrCreateSession(request.getId());
-            String sessionId = ctx.getSessionId();
+                // 获取或创建会话
+                SessionManager.SessionContext ctx = sessionManager.getOrCreateSession(request.getId());
+                String sessionId = ctx.getSessionId();
 
-            // 决定使用摘要还是详情
-            List<Map<String, String>> history;
-            if (ctx.hasSummary()) {
-                history = Collections.emptyList(); // 摘要模式下不传原始历史
-            } else {
-                history = ctx.getHistory();
-            }
-            logger.info("会话历史消息对数: {}, 摘要模式: {}", history.size() / 2, ctx.hasSummary());
+                // 决定使用摘要还是详情
+                List<Map<String, String>> history;
+                if (ctx.hasSummary()) {
+                    history = Collections.emptyList(); // 摘要模式下不传原始历史
+                } else {
+                    history = ctx.getHistory();
+                }
+                logger.info("会话历史消息对数: {}, 摘要模式: {}", history.size() / 2, ctx.hasSummary());
 
-            // 创建 DashScope API 和 ChatModel
-            DashScopeApi dashScopeApi = chatService.createDashScopeApi();
-            DashScopeChatModel chatModel = chatService.createStandardChatModel(dashScopeApi);
+                // 创建 DashScope API 和 ChatModel
+                DashScopeApi dashScopeApi = chatService.createDashScopeApi();
+                DashScopeChatModel chatModel = chatService.createStandardChatModel(dashScopeApi);
 
-            // 记录可用工具
-            chatService.logAvailableTools();
+                // 记录可用工具
+                chatService.logAvailableTools();
 
-            logger.info("开始 ReactAgent 对话（支持自动工具调用）");
+                logger.info("开始 ReactAgent 对话（支持自动工具调用）");
 
-            // 构建系统提示词（包含历史消息或摘要 + 用户画像）
-            String systemPrompt = chatService.buildSystemPrompt(history, ctx.getSummary(), userId);
+                // 构建系统提示词（包含历史消息或摘要 + 用户画像）
+                String systemPrompt = chatService.buildSystemPrompt(history, ctx.getSummary(), userId);
 
                 // 意图特定的提示词调整
                 if (intent.getCategory() == IntentCategory.UNCLEAR) {
@@ -123,24 +123,24 @@ public class ChatController {
                     systemPrompt += "\n\n用户正在查询内部知识文档，请优先使用 queryInternalDocs 工具检索相关文档后回答。\n";
                 }
 
-            // 意图特定的提示词调整
-            if (intent.getCategory() == IntentCategory.UNCLEAR) {
-                systemPrompt += "\n\n如果用户意图不明确，请先友好地引导用户澄清：是遇到了系统告警需要排查，还是想了解相关知识？\n";
-            } else if (intent.getCategory() == IntentCategory.KNOWLEDGE_RETRIEVAL) {
-                systemPrompt += "\n\n用户正在查询内部知识文档，请优先使用 queryInternalDocs 工具检索相关文档后回答。\n";
-            }
+                // 意图特定的提示词调整
+                if (intent.getCategory() == IntentCategory.UNCLEAR) {
+                    systemPrompt += "\n\n如果用户意图不明确，请先友好地引导用户澄清：是遇到了系统告警需要排查，还是想了解相关知识？\n";
+                } else if (intent.getCategory() == IntentCategory.KNOWLEDGE_RETRIEVAL) {
+                    systemPrompt += "\n\n用户正在查询内部知识文档，请优先使用 queryInternalDocs 工具检索相关文档后回答。\n";
+                }
 
-            // 创建 ReactAgent
-            ReactAgent agent = chatService.createReactAgent(chatModel, systemPrompt);
+                // 创建 ReactAgent
+                ReactAgent agent = chatService.createReactAgent(chatModel, systemPrompt);
 
-            // 执行对话
-            String fullAnswer = chatService.executeChat(agent, request.getQuestion());
+                // 执行对话
+                String fullAnswer = chatService.executeChat(agent, request.getQuestion());
 
-            // 更新会话历史到 Redis
-            sessionManager.addMessage(sessionId, request.getQuestion(), fullAnswer, userId);
-            logger.info("已更新会话历史 - SessionId: {}", sessionId);
+                // 更新会话历史到 Redis
+                sessionManager.addMessage(sessionId, request.getQuestion(), fullAnswer, userId);
+                logger.info("已更新会话历史 - SessionId: {}", sessionId);
 
-            return ResponseEntity.ok(ApiResponse.success(ChatResponse.success(fullAnswer, sessionId)));
+                return ResponseEntity.ok(ApiResponse.success(ChatResponse.success(fullAnswer, sessionId)));
 
             } finally {
                 RecallMemoryTool.clearCurrentUserId();
@@ -239,88 +239,88 @@ public class ChatController {
 
                 // 构建系统提示词（包含历史消息或摘要 + 用户画像）
                 String systemPrompt = chatService.buildSystemPrompt(history, ctx.getSummary(), userId);
-                
+
                 // 创建 ReactAgent
                 ReactAgent agent = chatService.createReactAgent(chatModel, systemPrompt);
-                
+
                 // 用于累积完整答案
                 StringBuilder fullAnswerBuilder = new StringBuilder();
-                
+
                 // 使用 agent.stream() 进行流式对话
                 Flux<NodeOutput> stream = agent.stream(request.getQuestion());
-                
+
                 stream.subscribe(
-                    output -> {
-                        try {
-                            // 检查是否为 StreamingOutput 类型
-                            if (output instanceof StreamingOutput streamingOutput) {
-                                OutputType type = streamingOutput.getOutputType();
-                                
-                                // 处理模型推理的流式输出
-                                if (type == OutputType.AGENT_MODEL_STREAMING) {
-                                    // 流式增量内容，逐步显示
-                                    String chunk = streamingOutput.message().getText();
-                                    if (chunk != null && !chunk.isEmpty()) {
-                                        fullAnswerBuilder.append(chunk);
-                                        
-                                        // 实时发送到前端
-                                        emitter.send(SseEmitter.event()
-                                                .name("message")
-                                                .data(SseMessage.content(chunk), MediaType.APPLICATION_JSON));
-                                        
-                                        logger.info("发送流式内容: {}", chunk);
+                        output -> {
+                            try {
+                                // 检查是否为 StreamingOutput 类型
+                                if (output instanceof StreamingOutput streamingOutput) {
+                                    OutputType type = streamingOutput.getOutputType();
+
+                                    // 处理模型推理的流式输出
+                                    if (type == OutputType.AGENT_MODEL_STREAMING) {
+                                        // 流式增量内容，逐步显示
+                                        String chunk = streamingOutput.message().getText();
+                                        if (chunk != null && !chunk.isEmpty()) {
+                                            fullAnswerBuilder.append(chunk);
+
+                                            // 实时发送到前端
+                                            emitter.send(SseEmitter.event()
+                                                    .name("message")
+                                                    .data(SseMessage.content(chunk), MediaType.APPLICATION_JSON));
+
+                                            logger.info("发送流式内容: {}", chunk);
+                                        }
+                                    } else if (type == OutputType.AGENT_MODEL_FINISHED) {
+                                        // 模型推理完成
+                                        logger.info("模型输出完成");
+                                    } else if (type == OutputType.AGENT_TOOL_FINISHED) {
+                                        // 工具调用完成
+                                        logger.info("工具调用完成: {}", output.node());
+                                    } else if (type == OutputType.AGENT_HOOK_FINISHED) {
+                                        // Hook 执行完成
+                                        logger.debug("Hook 执行完成: {}", output.node());
                                     }
-                                } else if (type == OutputType.AGENT_MODEL_FINISHED) {
-                                    // 模型推理完成
-                                    logger.info("模型输出完成");
-                                } else if (type == OutputType.AGENT_TOOL_FINISHED) {
-                                    // 工具调用完成
-                                    logger.info("工具调用完成: {}", output.node());
-                                } else if (type == OutputType.AGENT_HOOK_FINISHED) {
-                                    // Hook 执行完成
-                                    logger.debug("Hook 执行完成: {}", output.node());
                                 }
+                            } catch (IOException e) {
+                                logger.error("发送流式消息失败", e);
+                                throw new RuntimeException(e);
                             }
-                        } catch (IOException e) {
-                            logger.error("发送流式消息失败", e);
-                            throw new RuntimeException(e);
-                        }
-                    },
-                    error -> {
-                        // 错误处理
-                        RecallMemoryTool.clearCurrentUserId();
-                        logger.error("ReactAgent 流式对话失败", error);
-                        try {
-                            emitter.send(SseEmitter.event()
-                                    .name("message")
-                                    .data(SseMessage.error(error.getMessage()), MediaType.APPLICATION_JSON));
-                        } catch (IOException ex) {
-                            logger.error("发送错误消息失败", ex);
-                        }
-                        emitter.completeWithError(error);
-                    },
-                    () -> {
-                        // 完成处理
-                        try {
+                        },
+                        error -> {
+                            // 错误处理
                             RecallMemoryTool.clearCurrentUserId();
-                            String fullAnswer = fullAnswerBuilder.toString();
-                            logger.info("ReactAgent 流式对话完成 - SessionId: {}, 答案长度: {}",
-                                sessionId, fullAnswer.length());
+                            logger.error("ReactAgent 流式对话失败", error);
+                            try {
+                                emitter.send(SseEmitter.event()
+                                        .name("message")
+                                        .data(SseMessage.error(error.getMessage()), MediaType.APPLICATION_JSON));
+                            } catch (IOException ex) {
+                                logger.error("发送错误消息失败", ex);
+                            }
+                            emitter.completeWithError(error);
+                        },
+                        () -> {
+                            // 完成处理
+                            try {
+                                RecallMemoryTool.clearCurrentUserId();
+                                String fullAnswer = fullAnswerBuilder.toString();
+                                logger.info("ReactAgent 流式对话完成 - SessionId: {}, 答案长度: {}",
+                                        sessionId, fullAnswer.length());
 
-                            // 更新会话历史到 Redis
-                            sessionManager.addMessage(sessionId, request.getQuestion(), fullAnswer, userId);
-                            logger.info("已更新会话历史 - SessionId: {}", sessionId);
+                                // 更新会话历史到 Redis
+                                sessionManager.addMessage(sessionId, request.getQuestion(), fullAnswer, userId);
+                                logger.info("已更新会话历史 - SessionId: {}", sessionId);
 
-                            // 发送完成标记（包含 sessionId）
-                            emitter.send(SseEmitter.event()
-                                    .name("message")
-                                    .data(SseMessage.done(sessionId), MediaType.APPLICATION_JSON));
-                            emitter.complete();
-                        } catch (IOException e) {
-                            logger.error("发送完成消息失败", e);
-                            emitter.completeWithError(e);
+                                // 发送完成标记（包含 sessionId）
+                                emitter.send(SseEmitter.event()
+                                        .name("message")
+                                        .data(SseMessage.done(sessionId), MediaType.APPLICATION_JSON));
+                                emitter.complete();
+                            } catch (IOException e) {
+                                logger.error("发送完成消息失败", e);
+                                emitter.completeWithError(e);
+                            }
                         }
-                    }
                 );
 
             } catch (Exception e) {
@@ -365,7 +365,7 @@ public class ChatController {
                 ToolCallback[] toolCallbacks = tools.getToolCallbacks();
 
                 emitter.send(SseEmitter.event().name("message").data(SseMessage.content("正在读取告警并拆解任务...\n")));
-                
+
                 // 调用 AiOpsService 执行分析流程
                 Optional<OverAllState> overAllStateOptional = aiOpsService.executeAiOpsAnalysis(chatModel, toolCallbacks);
 
@@ -386,28 +386,28 @@ public class ChatController {
                 if (finalReportOptional.isPresent()) {
                     String finalReportText = finalReportOptional.get();
                     logger.info("提取到 Planner 最终报告，长度: {}", finalReportText.length());
-                    
+
                     // 发送分隔线
                     emitter.send(SseEmitter.event().name("message")
                             .data(SseMessage.content("\n\n" + "=".repeat(60) + "\n"), MediaType.APPLICATION_JSON));
-                    
+
                     // 发送完整的告警分析报告
                     emitter.send(SseEmitter.event().name("message")
                             .data(SseMessage.content("📋 **告警分析报告**\n\n"), MediaType.APPLICATION_JSON));
-                    
+
                     int chunkSize = 50;
                     for (int i = 0; i < finalReportText.length(); i += chunkSize) {
                         int end = Math.min(i + chunkSize, finalReportText.length());
                         String chunk = finalReportText.substring(i, end);
-                        
+
                         emitter.send(SseEmitter.event().name("message")
                                 .data(SseMessage.content(chunk), MediaType.APPLICATION_JSON));
                     }
-                    
+
                     // 发送结束分隔线
                     emitter.send(SseEmitter.event().name("message")
                             .data(SseMessage.content("\n" + "=".repeat(60) + "\n\n"), MediaType.APPLICATION_JSON));
-                    
+
                     logger.info("最终报告已完整输出");
                 } else {
                     logger.warn("未能提取到 Planner 最终报告");
