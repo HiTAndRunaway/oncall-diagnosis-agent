@@ -123,13 +123,6 @@ public class ChatController {
                     systemPrompt += "\n\n用户正在查询内部知识文档，请优先使用 queryInternalDocs 工具检索相关文档后回答。\n";
                 }
 
-                // 意图特定的提示词调整
-                if (intent.getCategory() == IntentCategory.UNCLEAR) {
-                    systemPrompt += "\n\n如果用户意图不明确，请先友好地引导用户澄清：是遇到了系统告警需要排查，还是想了解相关知识？\n";
-                } else if (intent.getCategory() == IntentCategory.KNOWLEDGE_RETRIEVAL) {
-                    systemPrompt += "\n\n用户正在查询内部知识文档，请优先使用 queryInternalDocs 工具检索相关文档后回答。\n";
-                }
-
                 // 创建 ReactAgent
                 ReactAgent agent = chatService.createReactAgent(chatModel, systemPrompt);
 
