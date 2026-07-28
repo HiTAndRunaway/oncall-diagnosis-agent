@@ -1,0 +1,26 @@
+{
+  "alerts": {
+    "HighCPUUsage": {
+      "alertname": "HighCPUUsage",
+      "severity": "critical",
+      "labels": {"instance": "api-gateway:8080", "service": "api-gateway", "namespace": "production"},
+      "annotations": {
+        "summary": "CPU使用率持续超过80%",
+        "description": "api-gateway CPU使用率峰值95%，持续时间超过5分钟，当前值92%"
+      },
+      "activeAt": "2026-07-28T14:30:00Z"
+    }
+  },
+  "logs": {
+    "system-metrics": [
+      {"timestamp": "2026-07-28T14:25:00Z", "level": "WARN", "message": "CPU usage exceeded threshold: 87% on api-gateway-7d4f8b9c-x2k5", "cpu_percent": 87, "pod": "api-gateway-7d4f8b9c-x2k5"},
+      {"timestamp": "2026-07-28T14:28:00Z", "level": "WARN", "message": "CPU usage exceeded threshold: 92% on api-gateway-7d4f8b9c-x2k5", "cpu_percent": 92, "pod": "api-gateway-7d4f8b9c-x2k5"},
+      {"timestamp": "2026-07-28T14:30:00Z", "level": "CRITICAL", "message": "CPU usage critical: 95% on api-gateway-7d4f8b9c-x2k5, top process: java (pid 12345) at 320% CPU", "cpu_percent": 95, "pod": "api-gateway-7d4f8b9c-x2k5", "top_process": "java:12345:320%"}
+    ],
+    "application-logs": [
+      {"timestamp": "2026-07-28T14:28:30Z", "level": "ERROR", "message": "java.lang.StackOverflowError at com.example.service.OrderService.processOrder(OrderService.java:156) - recursive call detected", "service": "api-gateway", "thread": "http-nio-8080-exec-42"},
+      {"timestamp": "2026-07-28T14:29:00Z", "level": "ERROR", "message": "Request timeout: GET /api/orders took 45231ms, thread pool usage: 85%", "service": "api-gateway", "thread": "http-nio-8080-exec-87"},
+      {"timestamp": "2026-07-28T14:30:15Z", "level": "WARN", "message": "High thread pool utilization: 95%, active threads: 190/200", "service": "api-gateway"}
+    ]
+  }
+}

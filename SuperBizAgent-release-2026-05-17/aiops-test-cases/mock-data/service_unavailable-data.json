@@ -1,0 +1,27 @@
+{
+  "alerts": {
+    "ServiceUnavailable": {
+      "alertname": "ServiceUnavailable",
+      "severity": "critical",
+      "labels": {"instance": "payment-service:8083", "service": "payment-service", "namespace": "production"},
+      "annotations": {
+        "summary": "payment-service 健康检查失败",
+        "description": "payment-service 所有实例健康检查连续3次失败，返回 HTTP 502，影响范围：全部支付功能"
+      },
+      "activeAt": "2026-07-28T16:00:00Z"
+    }
+  },
+  "logs": {
+    "application-logs": [
+      {"timestamp": "2026-07-28T15:58:00Z", "level": "ERROR", "message": "Database connection failed: CommunicationsException: Communications link failure. The last packet sent successfully to the server was 0 milliseconds ago", "service": "payment-service", "instance": "payment-service-5f8c9b-abc12"},
+      {"timestamp": "2026-07-28T15:59:00Z", "level": "FATAL", "message": "Application startup failed: Cannot connect to database jdbc:mysql://db-master:3306/payment", "service": "payment-service", "instance": "payment-service-5f8c9b-abc12"},
+      {"timestamp": "2026-07-28T15:59:30Z", "level": "ERROR", "message": "Health check failed 3/3: downstream dependency 'payment-db' unreachable", "service": "payment-service", "health_endpoint": "/actuator/health"},
+      {"timestamp": "2026-07-28T16:00:00Z", "level": "ERROR", "message": "Nginx upstream error: 502 Bad Gateway - no live upstreams for payment-service", "service": "nginx", "upstream": "payment-service"}
+    ],
+    "system-events": [
+      {"timestamp": "2026-07-28T15:57:00Z", "level": "INFO", "message": "Deployment started: payment-service v2.3.1 (previous: v2.3.0)", "event": "deployment", "version": "v2.3.1"},
+      {"timestamp": "2026-07-28T15:58:00Z", "level": "ERROR", "message": "K8s Event: Pod payment-service-5f8c9b-abc12 readiness probe failed: connection refused", "event": "ProbeFailed", "pod": "payment-service-5f8c9b-abc12"},
+      {"timestamp": "2026-07-28T16:00:00Z", "level": "ERROR", "message": "K8s Event: Service payment-service has no ready endpoints", "event": "NoEndpoints", "service": "payment-service"}
+    ]
+  }
+}

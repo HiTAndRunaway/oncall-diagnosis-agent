@@ -1,0 +1,25 @@
+{
+  "alerts": {
+    "SlowResponse": {
+      "alertname": "SlowResponse",
+      "severity": "warning",
+      "labels": {"instance": "order-service:8082", "service": "order-service", "namespace": "production"},
+      "annotations": {
+        "summary": "order-service P99响应时间超过5秒",
+        "description": "order-service P99响应时间从500ms恶化到8000ms，当前P99=8.2s，持续10分钟"
+      },
+      "activeAt": "2026-07-28T11:00:00Z"
+    }
+  },
+  "logs": {
+    "application-logs": [
+      {"timestamp": "2026-07-28T10:55:00Z", "level": "WARN", "message": "Slow request detected: POST /api/orders took 5234ms", "service": "order-service", "endpoint": "POST /api/orders", "duration_ms": 5234},
+      {"timestamp": "2026-07-28T10:58:00Z", "level": "WARN", "message": "External API call timeout: GET https://inventory-api.internal/products/stock took 8100ms (threshold: 3000ms)", "service": "order-service", "downstream": "inventory-api", "duration_ms": 8100},
+      {"timestamp": "2026-07-28T11:00:00Z", "level": "ERROR", "message": "Request timeout: GET /api/orders/20260728001 returned 504 after 15000ms, hystrix fallback triggered", "service": "order-service", "request_id": "20260728001"}
+    ],
+    "database-slow-query": [
+      {"timestamp": "2026-07-28T10:56:00Z", "level": "WARN", "message": "Slow query detected (45.2s): SELECT o.*, oi.* FROM orders o LEFT JOIN order_items oi ON o.id = oi.order_id WHERE o.status = 'PENDING' AND o.created_at > '2026-07-01' ORDER BY o.created_at DESC", "database": "orders_db", "duration_ms": 45200, "rows_examined": 2500000},
+      {"timestamp": "2026-07-28T10:57:00Z", "level": "WARN", "message": "Slow query detected (38.7s): SELECT COUNT(*) FROM orders WHERE status = 'PENDING' AND created_at > '2026-06-01'", "database": "orders_db", "duration_ms": 38700, "rows_examined": 1800000}
+    ]
+  }
+}

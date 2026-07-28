@@ -1,0 +1,26 @@
+{
+  "alerts": {
+    "HighMQConsumerLag": {
+      "alertname": "HighMQConsumerLag",
+      "severity": "critical",
+      "labels": {"topic": "order.events", "consumer_group": "order-processor-group", "cluster": "kafka-prod"},
+      "annotations": {
+        "summary": "Kafka Consumer Lag超过10000",
+        "description": "Topic order.events Consumer Group order-processor-group 积压 15237 条消息，消费速率从 500msg/s 降至 12msg/s"
+      },
+      "activeAt": "2026-07-28T17:00:00Z"
+    }
+  },
+  "logs": {
+    "application-logs": [
+      {"timestamp": "2026-07-28T16:45:00Z", "level": "WARN", "message": "Consumer processing slow: batch of 100 messages took 45200ms to process", "service": "order-processor", "consumer_group": "order-processor-group", "batch_size": 100, "duration_ms": 45200},
+      {"timestamp": "2026-07-28T16:50:00Z", "level": "ERROR", "message": "Downstream call timeout: POST https://inventory-api/internal/reserve-stock timed out after 10000ms", "service": "order-processor", "downstream": "inventory-api"},
+      {"timestamp": "2026-07-28T16:55:00Z", "level": "ERROR", "message": "Consumer thread blocked: thread-7 stuck on inventory-api reserve-stock for 120s", "service": "order-processor", "thread": "consumer-thread-7"},
+      {"timestamp": "2026-07-28T17:00:00Z", "level": "CRITICAL", "message": "Kafka consumer lag critical: 15237 (topic=order.events, group=order-processor-group), consumer threads blocked", "service": "order-processor", "lag": 15237}
+    ],
+    "system-events": [
+      {"timestamp": "2026-07-28T16:40:00Z", "level": "INFO", "message": "Kafka rebalance triggered for consumer group order-processor-group", "event": "rebalance", "consumer_group": "order-processor-group"},
+      {"timestamp": "2026-07-28T16:55:00Z", "level": "WARN", "message": "Consumer heartbeat timeout: consumer-3 missed heartbeat, may be stuck in processing", "event": "heartbeat_timeout", "consumer": "consumer-3"}
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "alerts": {
+    "HighDatabaseConnectionUsage": {
+      "alertname": "HighDatabaseConnectionUsage",
+      "severity": "critical",
+      "labels": {"instance": "order-db:3306", "service": "order-service", "database": "orders_db"},
+      "annotations": {
+        "summary": "数据库连接数超过90%",
+        "description": "order-db 活跃连接 185/200（92.5%），等待队列长度 15，order-service 大量请求阻塞"
+      },
+      "activeAt": "2026-07-28T14:30:00Z"
+    }
+  },
+  "logs": {
+    "database-slow-query": [
+      {"timestamp": "2026-07-28T14:25:00Z", "level": "WARN", "message": "Slow query detected (32.5s): SELECT * FROM orders WHERE status = 'PENDING' ORDER BY created_at DESC", "database": "orders_db", "duration_ms": 32500, "lock_time_ms": 5000},
+      {"timestamp": "2026-07-28T14:28:00Z", "level": "WARN", "message": "Slow query detected (28.1s): UPDATE order_items SET status = 'PROCESSING' WHERE order_id IN (SELECT id FROM orders WHERE status = 'PENDING')", "database": "orders_db", "duration_ms": 28100, "lock_time_ms": 8000}
+    ],
+    "database-error-logs": [
+      {"timestamp": "2026-07-28T14:29:00Z", "level": "ERROR", "message": "Cannot get JDBC Connection; nested exception is java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 30000ms", "service": "order-service", "pool": "HikariPool-1"},
+      {"timestamp": "2026-07-28T14:30:00Z", "level": "ERROR", "message": "HikariPool-1 - Pool exhausted: active=200, idle=0, waiting=15, max=200", "service": "order-service", "pool": "HikariPool-1"},
+      {"timestamp": "2026-07-28T14:30:30Z", "level": "ERROR", "message": "Too many connections error from MySQL: ERROR 1040 (HY000): Too many connections", "database": "orders_db", "source": "mysql"}
+    ]
+  }
+}

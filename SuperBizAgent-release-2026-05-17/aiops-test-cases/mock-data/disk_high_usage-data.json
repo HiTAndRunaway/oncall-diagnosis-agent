@@ -1,0 +1,26 @@
+{
+  "alerts": {
+    "HighDiskUsage": {
+      "alertname": "HighDiskUsage",
+      "severity": "warning",
+      "labels": {"instance": "app-server-01:22", "host": "app-server-01", "mount": "/data"},
+      "annotations": {
+        "summary": "磁盘使用率超过85%",
+        "description": "app-server-01 /data分区使用率89%，剩余空间仅15GB，48小时内可能写满"
+      },
+      "activeAt": "2026-07-28T16:30:00Z"
+    }
+  },
+  "logs": {
+    "system-metrics": [
+      {"timestamp": "2026-07-28T16:20:00Z", "level": "WARN", "message": "Disk usage warning: /data at 85% (850GB/1TB)", "host": "app-server-01", "mount": "/data"},
+      {"timestamp": "2026-07-28T16:28:00Z", "level": "ERROR", "message": "Write failed: No space left on device at /data/uploads/temp/", "host": "app-server-01"},
+      {"timestamp": "2026-07-28T16:30:00Z", "level": "CRITICAL", "message": "Disk usage critical: /data at 89% (890GB/1TB), largest directory: /data/logs (420GB)", "host": "app-server-01", "mount": "/data", "largest_dir": "/data/logs:420GB"}
+    ],
+    "application-logs": [
+      {"timestamp": "2026-07-28T16:25:00Z", "level": "ERROR", "message": "File upload failed: java.io.IOException: No space left on device", "service": "file-service", "host": "app-server-01"},
+      {"timestamp": "2026-07-28T16:28:00Z", "level": "ERROR", "message": "Failed to write access log: disk full, log rotation may be failing", "host": "app-server-01"},
+      {"timestamp": "2026-07-28T16:30:00Z", "level": "WARN", "message": "Log file growth rate: 5GB/day, disk full estimated in 3 days at current rate", "host": "app-server-01"}
+    ]
+  }
+}
