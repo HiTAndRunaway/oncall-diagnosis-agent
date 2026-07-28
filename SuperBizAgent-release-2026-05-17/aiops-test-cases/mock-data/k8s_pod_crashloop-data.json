@@ -1,0 +1,27 @@
+{
+  "alerts": {
+    "K8sPodCrashLoop": {
+      "alertname": "K8sPodCrashLoop",
+      "severity": "critical",
+      "labels": {"namespace": "production", "pod": "notification-service-8f3d2c", "deployment": "notification-service"},
+      "annotations": {
+        "summary": "K8s Pod CrashLoopBackOff",
+        "description": "notification-service Pod notification-service-8f3d2c 重启次数 23 次（过去30分钟），状态 CrashLoopBackOff，通知服务不可用"
+      },
+      "activeAt": "2026-07-28T09:30:00Z"
+    }
+  },
+  "logs": {
+    "application-logs": [
+      {"timestamp": "2026-07-28T09:15:00Z", "level": "FATAL", "message": "Application failed to start: Configuration property 'notification.email.smtp.host' is missing or invalid", "service": "notification-service", "pod": "notification-service-8f3d2c"},
+      {"timestamp": "2026-07-28T09:16:00Z", "level": "FATAL", "message": "Application failed to start: Configuration property 'notification.email.smtp.host' is missing or invalid (attempt 2)", "service": "notification-service", "pod": "notification-service-8f3d2c"},
+      {"timestamp": "2026-07-28T09:17:00Z", "level": "ERROR", "message": "Health check probe failed at /actuator/health: connection refused", "service": "notification-service", "pod": "notification-service-8f3d2c"}
+    ],
+    "system-events": [
+      {"timestamp": "2026-07-28T09:14:00Z", "level": "INFO", "message": "K8s Event: RollingUpdate started - notification-service v1.5.0 to v1.5.1", "event": "RollingUpdateStarted", "deployment": "notification-service"},
+      {"timestamp": "2026-07-28T09:15:00Z", "level": "ERROR", "message": "K8s Event: Pod notification-service-8f3d2c: BackOff - Back-off restarting failed container", "event": "BackOff", "pod": "notification-service-8f3d2c"},
+      {"timestamp": "2026-07-28T09:15:30Z", "level": "ERROR", "message": "K8s Event: Pod notification-service-8f3d2c: Liveness probe failed: connection refused (3 consecutive failures)", "event": "Unhealthy", "pod": "notification-service-8f3d2c"},
+      {"timestamp": "2026-07-28T09:30:00Z", "level": "CRITICAL", "message": "K8s Event: Pod notification-service-8f3d2c entered CrashLoopBackOff state after 23 restarts in 30min", "event": "CrashLoopBackOff", "pod": "notification-service-8f3d2c", "restart_count": 23}
+    ]
+  }
+}

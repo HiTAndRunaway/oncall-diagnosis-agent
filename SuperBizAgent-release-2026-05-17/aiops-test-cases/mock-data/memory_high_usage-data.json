@@ -1,0 +1,26 @@
+{
+  "alerts": {
+    "HighMemoryUsage": {
+      "alertname": "HighMemoryUsage",
+      "severity": "critical",
+      "labels": {"instance": "user-service:8081", "service": "user-service", "namespace": "production"},
+      "annotations": {
+        "summary": "内存使用率持续超过85%",
+        "description": "user-service JVM堆内存使用率92%，Full GC每30秒触发一次，已持续30分钟"
+      },
+      "activeAt": "2026-07-28T15:00:00Z"
+    }
+  },
+  "logs": {
+    "system-metrics": [
+      {"timestamp": "2026-07-28T14:45:00Z", "level": "WARN", "message": "JVM heap memory usage: 88% (3.5GB/4GB), GC count: 145", "service": "user-service", "pod": "user-service-6c9d5f8b-m3j7"},
+      {"timestamp": "2026-07-28T14:55:00Z", "level": "WARN", "message": "JVM heap memory usage: 92% (3.7GB/4GB), Full GC triggered, pause time: 2.3s", "service": "user-service", "pod": "user-service-6c9d5f8b-m3j7"},
+      {"timestamp": "2026-07-28T15:00:00Z", "level": "CRITICAL", "message": "JVM heap memory critical: 95% (3.8GB/4GB), Full GC frequency: every 30s, application may OOM soon", "service": "user-service", "pod": "user-service-6c9d5f8b-m3j7"}
+    ],
+    "application-logs": [
+      {"timestamp": "2026-07-28T14:50:00Z", "level": "WARN", "message": "Large object allocation detected: com.example.model.UserProfileCache occupying 1.2GB in heap", "service": "user-service", "thread": "http-nio-8081-exec-23"},
+      {"timestamp": "2026-07-28T14:56:00Z", "level": "ERROR", "message": "java.lang.OutOfMemoryError: GC overhead limit exceeded", "service": "user-service", "thread": "GC task"},
+      {"timestamp": "2026-07-28T14:58:00Z", "level": "ERROR", "message": "Connection pool exhausted: unable to acquire connection within 5000ms", "service": "user-service", "thread": "http-nio-8081-exec-89"}
+    ]
+  }
+}

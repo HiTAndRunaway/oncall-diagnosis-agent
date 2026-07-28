@@ -1,0 +1,37 @@
+{
+  "alerts": {
+    "HighErrorRate": {
+      "alertname": "HighErrorRate",
+      "severity": "critical",
+      "labels": {"instance": "api-gateway:8080", "service": "api-gateway", "namespace": "production"},
+      "annotations": {
+        "summary": "错误率超过50%",
+        "description": "api-gateway HTTP 5xx 错误率从 0.1% 升至 67%，受影响端点：/api/recommendations, /api/orders, /api/products"
+      },
+      "activeAt": "2026-07-28T18:15:00Z"
+    },
+    "APITimeoutCascade": {
+      "alertname": "APITimeoutCascade",
+      "severity": "critical",
+      "labels": {"root_cause_service": "recommendation-service", "affected_services": "order-service,api-gateway"},
+      "annotations": {
+        "summary": "API超时级联故障",
+        "description": "recommendation-service 调用第三方API超时→线程池耗尽→order-service调用超时→api-gateway线程池耗尽→全系统不可用"
+      },
+      "activeAt": "2026-07-28T18:20:00Z"
+    }
+  },
+  "logs": {
+    "application-logs": [
+      {"timestamp": "2026-07-28T18:10:00Z", "level": "WARN", "message": "Slow downstream call: GET https://third-party-api.example.com/recommendations took 12000ms", "service": "recommendation-service", "downstream": "third-party-api", "duration_ms": 12000},
+      {"timestamp": "2026-07-28T18:12:00Z", "level": "ERROR", "message": "Tomcat thread pool exhausted: active=200/200, queue=100/100, rejecting new connections", "service": "recommendation-service", "thread_pool": "tomcat"},
+      {"timestamp": "2026-07-28T18:13:00Z", "level": "ERROR", "message": "Upstream timeout: GET http://recommendation-service/api/recommendations timed out after 5000ms (retry 3/3 failed)", "service": "order-service", "upstream": "recommendation-service"},
+      {"timestamp": "2026-07-28T18:15:00Z", "level": "ERROR", "message": "Tomcat thread pool exhausted: active=200/200, queue full, 67% of requests returning 503", "service": "order-service", "thread_pool": "tomcat"},
+      {"timestamp": "2026-07-28T18:18:00Z", "level": "CRITICAL", "message": "api-gateway circuit breaker opened for all upstreams: recommendation-service(broken), order-service(broken)", "service": "api-gateway", "circuit_breaker_state": "OPEN"},
+      {"timestamp": "2026-07-28T18:20:00Z", "level": "FATAL", "message": "System-wide outage: all upstream services unreachable, api-gateway returning 503 for all requests", "service": "api-gateway", "error_rate": "100%"}
+    ],
+    "database-slow-query": [
+      {"timestamp": "2026-07-28T18:11:00Z", "level": "WARN", "message": "Slow query: UPDATE recommendations_cache SET data = '...' WHERE user_id = 12345 took 8900ms - table lock contention", "duration_ms": 8900}
+    ]
+  }
+}
