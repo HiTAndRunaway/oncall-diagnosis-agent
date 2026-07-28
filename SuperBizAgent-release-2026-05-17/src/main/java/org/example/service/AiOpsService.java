@@ -10,6 +10,7 @@ import org.example.agent.tool.DateTimeTools;
 import org.example.agent.tool.InternalDocsTools;
 import org.example.agent.tool.QueryLogsTools;
 import org.example.agent.tool.QueryMetricsTools;
+import org.example.agent.eval.AIOpsEvaluator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -50,6 +51,9 @@ public class AiOpsService {
 
     @Autowired(required = false)  // Mock 模式下才注册
     private QueryLogsTools queryLogsTools;
+
+    @Autowired(required = false)
+    private AIOpsEvaluator aiOpsEvaluator;
 
     @Value("${aiops.total-timeout-seconds:300}")
     private int totalTimeoutSeconds;
@@ -95,6 +99,10 @@ public class AiOpsService {
         try {
             Optional<OverAllState> state = future.get(totalTimeoutSeconds, TimeUnit.SECONDS);
             logger.info("AIOps Agent 编排正常完成");
+
+            // 异步触发 LLM-as-Judge 质量评估
+            triggerAsyncEvaluation(state);
+
             return state;
         } catch (TimeoutException e) {
             logger.warn("[AIOps] 分析超时 ({} 秒)，强制终止并生成兜底报告", totalTimeoutSeconds);
@@ -341,6 +349,23 @@ public class AiOpsService {
                   "nextHint": "建议转向高占用进程"
                 }
                 """;
+    }
+
+    /**
+     * 异步触发 LLM-as-Judge 质量评估
+     */
+    private void triggerAsyncEvaluation(Optional<OverAllState> stateOptional) {
+        if (aiOpsEvaluator == null) {
+            return;
+        }
+        try {
+            stateOptional.ifPresent(state -> {
+                Optional<String> report = extractFinalReport(state);
+                report.ifPresent(r -> aiOpsEvaluator.evaluateAsync(null, r));
+            });
+        } catch (Exception e) {
+            logger.warn("[AIOps] 触发评估失败（不影响主流程）: {}", e.getMessage());
+        }
     }
 
     /**
