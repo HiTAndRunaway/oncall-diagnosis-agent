@@ -206,6 +206,13 @@ resilience4j:
 aiops:
   total-timeout-seconds: 300  # Agent 分析总超时，默认 5 分钟
 
+# ===== 意图识别路由 =====
+intent:
+  router:
+    enabled: true
+    model: qwen-turbo
+    confidence-threshold: 0.85
+
 # ==================== Security & Authentication ====================
 
 # API Key 认证配置
