@@ -205,6 +205,12 @@ resilience4j:
 # AIOps 超时保护
 aiops:
   total-timeout-seconds: 300  # Agent 分析总超时，默认 5 分钟
+  # LLM-as-Judge 质量评估
+  eval:
+    enabled: true
+    model: qwen-turbo
+    min-pass-score: 12
+    sample-rate: 1.0
 
 # ===== 意图识别路由 =====
 intent:
