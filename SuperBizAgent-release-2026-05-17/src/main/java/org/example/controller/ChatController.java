@@ -10,6 +10,9 @@ import com.alibaba.cloud.ai.graph.streaming.OutputType;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import lombok.Getter;
 import lombok.Setter;
+import org.example.agent.router.IntentCategory;
+import org.example.agent.router.IntentResult;
+import org.example.agent.router.IntentRouter;
 import org.example.agent.tool.RecallMemoryTool;
 import org.example.service.AiOpsService;
 import org.example.service.ChatService;
@@ -55,6 +58,9 @@ public class ChatController {
     @Autowired
     private ToolCallbackProvider tools;
 
+    @Autowired
+    private IntentRouter intentRouter;
+
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
     /**
@@ -70,6 +76,14 @@ public class ChatController {
             if (request.getQuestion() == null || request.getQuestion().trim().isEmpty()) {
                 logger.warn("问题内容为空");
                 return ResponseEntity.ok(ApiResponse.success(ChatResponse.error("问题内容不能为空")));
+            }
+
+            // 意图识别路由
+            IntentResult intent = intentRouter.classify(request.getQuestion());
+            logger.info("[IntentRouter] category={} confidence={}", intent.getCategory(), intent.getConfidence());
+
+            if (intent.getCategory() == IntentCategory.ALERT_DIAGNOSIS) {
+                return handleAIOpsRoute(request);
             }
 
             // 从 SecurityContext 获取当前用户 ID
@@ -101,6 +115,20 @@ public class ChatController {
 
             // 构建系统提示词（包含历史消息或摘要 + 用户画像）
             String systemPrompt = chatService.buildSystemPrompt(history, ctx.getSummary(), userId);
+
+                // 意图特定的提示词调整
+                if (intent.getCategory() == IntentCategory.UNCLEAR) {
+                    systemPrompt += "\n\n如果用户意图不明确，请先友好地引导用户澄清：是遇到了系统告警需要排查，还是想了解相关知识？\n";
+                } else if (intent.getCategory() == IntentCategory.KNOWLEDGE_RETRIEVAL) {
+                    systemPrompt += "\n\n用户正在查询内部知识文档，请优先使用 queryInternalDocs 工具检索相关文档后回答。\n";
+                }
+
+            // 意图特定的提示词调整
+            if (intent.getCategory() == IntentCategory.UNCLEAR) {
+                systemPrompt += "\n\n如果用户意图不明确，请先友好地引导用户澄清：是遇到了系统告警需要排查，还是想了解相关知识？\n";
+            } else if (intent.getCategory() == IntentCategory.KNOWLEDGE_RETRIEVAL) {
+                systemPrompt += "\n\n用户正在查询内部知识文档，请优先使用 queryInternalDocs 工具检索相关文档后回答。\n";
+            }
 
             // 创建 ReactAgent
             ReactAgent agent = chatService.createReactAgent(chatModel, systemPrompt);
@@ -167,6 +195,15 @@ public class ChatController {
             } catch (IOException e) {
                 emitter.completeWithError(e);
             }
+            return emitter;
+        }
+
+        // 意图识别路由（在主线程中执行，避免 executor 线程中调用 LLM 的复杂性）
+        IntentResult intent = intentRouter.classify(request.getQuestion());
+        logger.info("[IntentRouter] category={} confidence={}", intent.getCategory(), intent.getConfidence());
+
+        if (intent.getCategory() == IntentCategory.ALERT_DIAGNOSIS) {
+            handleAIOpsRouteStream(emitter);
             return emitter;
         }
 
@@ -397,6 +434,123 @@ public class ChatController {
         return emitter;
     }
 
+
+    /**
+     * AIOps 路由处理（同步模式，用于 /chat 端点）
+     * 当 IntentRouter 分类为 ALERT_DIAGNOSIS 时调用
+     */
+    private ResponseEntity<ApiResponse<ChatResponse>> handleAIOpsRoute(ChatRequest request) {
+        try {
+            logger.info("[AIOps Route] 路由到 AIOps 分析流程 - Question: {}", request.getQuestion());
+
+            DashScopeApi dashScopeApi = chatService.createDashScopeApi();
+            DashScopeChatModel chatModel = DashScopeChatModel.builder()
+                    .dashScopeApi(dashScopeApi)
+                    .defaultOptions(DashScopeChatOptions.builder()
+                            .withModel(DashScopeChatModel.DEFAULT_MODEL_NAME)
+                            .withTemperature(0.3)
+                            .withMaxToken(8000)
+                            .withTopP(0.9)
+                            .build())
+                    .build();
+
+            ToolCallback[] toolCallbacks = tools.getToolCallbacks();
+            Optional<OverAllState> stateOptional = aiOpsService.executeAiOpsAnalysis(chatModel, toolCallbacks);
+
+            if (stateOptional.isEmpty()) {
+                return ResponseEntity.ok(ApiResponse.success(
+                        ChatResponse.error("AIOps 分析未能获取有效结果，请稍后重试")));
+            }
+
+            Optional<String> reportOptional = aiOpsService.extractFinalReport(stateOptional.get());
+            if (reportOptional.isPresent()) {
+                return ResponseEntity.ok(ApiResponse.success(
+                        ChatResponse.success(reportOptional.get(), request.getId())));
+            } else {
+                return ResponseEntity.ok(ApiResponse.success(
+                        ChatResponse.error("AIOps 流程已完成，但未能生成最终报告")));
+            }
+
+        } catch (Exception e) {
+            logger.error("[AIOps Route] 分析失败", e);
+            return ResponseEntity.ok(ApiResponse.success(
+                    ChatResponse.error("AIOps 分析失败: " + e.getMessage())));
+        }
+    }
+
+    /**
+     * AIOps 路由处理（SSE 流式模式，用于 /chat_stream 端点）
+     * 当 IntentRouter 分类为 ALERT_DIAGNOSIS 时调用
+     */
+    private void handleAIOpsRouteStream(SseEmitter emitter) {
+        executor.execute(() -> {
+            try {
+                logger.info("[AIOps Route SSE] 路由到 AIOps 流式分析流程");
+
+                DashScopeApi dashScopeApi = chatService.createDashScopeApi();
+                DashScopeChatModel chatModel = DashScopeChatModel.builder()
+                        .dashScopeApi(dashScopeApi)
+                        .defaultOptions(DashScopeChatOptions.builder()
+                                .withModel(DashScopeChatModel.DEFAULT_MODEL_NAME)
+                                .withTemperature(0.3)
+                                .withMaxToken(8000)
+                                .withTopP(0.9)
+                                .build())
+                        .build();
+
+                ToolCallback[] toolCallbacks = tools.getToolCallbacks();
+
+                emitter.send(SseEmitter.event().name("message")
+                        .data(SseMessage.content("正在读取告警并拆解任务...\n"), MediaType.APPLICATION_JSON));
+
+                Optional<OverAllState> stateOptional = aiOpsService.executeAiOpsAnalysis(chatModel, toolCallbacks);
+
+                if (stateOptional.isEmpty()) {
+                    emitter.send(SseEmitter.event().name("message")
+                            .data(SseMessage.error("AIOps 分析未能获取有效结果"), MediaType.APPLICATION_JSON));
+                    emitter.complete();
+                    return;
+                }
+
+                Optional<String> reportOptional = aiOpsService.extractFinalReport(stateOptional.get());
+
+                if (reportOptional.isPresent()) {
+                    String report = reportOptional.get();
+                    emitter.send(SseEmitter.event().name("message")
+                            .data(SseMessage.content("\n\n" + "=".repeat(60) + "\n"), MediaType.APPLICATION_JSON));
+                    emitter.send(SseEmitter.event().name("message")
+                            .data(SseMessage.content("📋 **告警分析报告**\n\n"), MediaType.APPLICATION_JSON));
+
+                    int chunkSize = 50;
+                    for (int i = 0; i < report.length(); i += chunkSize) {
+                        int end = Math.min(i + chunkSize, report.length());
+                        emitter.send(SseEmitter.event().name("message")
+                                .data(SseMessage.content(report.substring(i, end)), MediaType.APPLICATION_JSON));
+                    }
+
+                    emitter.send(SseEmitter.event().name("message")
+                            .data(SseMessage.content("\n" + "=".repeat(60) + "\n\n"), MediaType.APPLICATION_JSON));
+                } else {
+                    emitter.send(SseEmitter.event().name("message")
+                            .data(SseMessage.content("⚠️ 流程已完成，但未能生成最终报告。"), MediaType.APPLICATION_JSON));
+                }
+
+                emitter.send(SseEmitter.event().name("message").data(SseMessage.done(), MediaType.APPLICATION_JSON));
+                emitter.complete();
+                logger.info("[AIOps Route SSE] 流式分析完成");
+
+            } catch (Exception e) {
+                logger.error("[AIOps Route SSE] 分析失败", e);
+                try {
+                    emitter.send(SseEmitter.event().name("message")
+                            .data(SseMessage.error("AIOps 分析失败: " + e.getMessage()), MediaType.APPLICATION_JSON));
+                } catch (IOException ex) {
+                    logger.error("发送错误消息失败", ex);
+                }
+                emitter.completeWithError(e);
+            }
+        });
+    }
 
     /**
      * 获取会话信息
