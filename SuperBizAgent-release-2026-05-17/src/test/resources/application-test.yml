@@ -1,0 +1,27 @@
+# Test profile configuration
+spring:
+  ai:
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY:test-key}
+
+prometheus:
+  mock-enabled: true
+
+cls:
+  mock-enabled: true
+
+superbiz:
+  security:
+    enabled: false
+
+aiops:
+  total-timeout-seconds: 300
+  eval:
+    enabled: true
+    min-pass-score: 12
+    sample-rate: 1.0
+
+intent:
+  router:
+    enabled: true
+    confidence-threshold: 0.85
