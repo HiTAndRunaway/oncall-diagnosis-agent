@@ -11,8 +11,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 /**
- * Global exception handler that converts exceptions into
- * standardized ApiResponse JSON bodies with proper HTTP status codes.
+ * 全局异常处理器，将异常转换为带有适当HTTP状态码的标准化ApiResponse JSON响应体。
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -20,8 +19,8 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     /**
-     * Handle all business exceptions.
-     * Uses the exception's built-in httpStatus to set the response code.
+     * 处理所有业务异常。
+     * 使用异常内置的httpStatus设置响应状态码。
      */
     @ExceptionHandler(BizException.class)
     public ResponseEntity<ApiResponse<Void>> handleBiz(BizException ex, HttpServletRequest req) {
@@ -34,8 +33,8 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Handle validation failures from @Valid annotations.
-     * Extracts field-level error messages and joins them.
+     * 处理来自@Valid注解的校验失败。
+     * 提取字段级别的错误信息并进行拼接。
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleValidation(
@@ -52,8 +51,8 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Catch-all handler for unexpected exceptions.
-     * Returns a generic message to avoid leaking internal details.
+     * 兜底异常处理器，处理未预期的异常。
+     * 返回通用消息以避免泄露内部细节。
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnknown(Exception ex, HttpServletRequest req) {

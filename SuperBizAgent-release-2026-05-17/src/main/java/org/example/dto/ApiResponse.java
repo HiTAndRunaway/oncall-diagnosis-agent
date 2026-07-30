@@ -3,9 +3,9 @@ package org.example.dto;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
- * Generic API response wrapper for consistent response formatting.
+ * 通用 API 响应包装器，用于一致的响应格式化。
  *
- * @param <T> the type of the response data
+ * @param <T> 响应数据的类型
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ApiResponse<T> {
@@ -77,7 +77,7 @@ public class ApiResponse<T> {
     }
 
     /**
-     * Inner record for pagination information.
+     * 分页信息内部记录。
      */
     public record PageInfo(int page, int size, long total) {
     }

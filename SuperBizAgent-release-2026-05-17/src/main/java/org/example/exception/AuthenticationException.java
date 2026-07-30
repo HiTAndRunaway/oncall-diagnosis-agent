@@ -1,7 +1,7 @@
 package org.example.exception;
 
 /**
- * Thrown when authentication fails.
+ * 当身份验证失败时抛出。
  */
 public class AuthenticationException extends BizException {
 

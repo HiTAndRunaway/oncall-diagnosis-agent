@@ -1,8 +1,8 @@
 package org.example.exception;
 
 /**
- * Abstract base exception for all business exceptions in the system.
- * All concrete business exceptions must extend this class.
+ * 系统中所有业务异常的抽象基类。
+ * 所有具体的业务异常必须继承此类。
  */
 public abstract class BizException extends RuntimeException {
 

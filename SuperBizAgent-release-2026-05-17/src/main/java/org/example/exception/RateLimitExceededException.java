@@ -1,7 +1,7 @@
 package org.example.exception;
 
 /**
- * Thrown when a rate limit has been exceeded.
+ * 当超过速率限制时抛出。
  */
 public class RateLimitExceededException extends BizException {
 

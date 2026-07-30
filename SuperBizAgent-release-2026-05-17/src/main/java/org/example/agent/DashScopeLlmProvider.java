@@ -18,8 +18,8 @@ import reactor.core.publisher.Flux;
 import java.util.List;
 
 /**
- * DashScope implementation of {@link LlmProvider}.
- * Encapsulates DashScopeChatModel creation and invocation.
+ * {@link LlmProvider} 的 DashScope 实现。
+ * 封装 DashScopeChatModel 的创建与调用。
  */
 @Component
 public class DashScopeLlmProvider implements LlmProvider {
@@ -57,8 +57,8 @@ public class DashScopeLlmProvider implements LlmProvider {
     }
 
     /**
-     * Circuit breaker fallback method.
-     * Logs the failure and throws a business exception for the global handler to process.
+     * 断路器降级方法。
+     * 记录失败日志并抛出业务异常，由全局处理器统一处理。
      */
     @SuppressWarnings("unused")
     private String chatFallback(String systemMessage, String userMessage, ChatOptions options, Throwable t) {
@@ -67,7 +67,7 @@ public class DashScopeLlmProvider implements LlmProvider {
     }
 
     /**
-     * Build a DashScopeChatModel from the given options.
+     * 根据给定的选项构建 DashScopeChatModel。
      */
     private DashScopeChatModel buildModel(ChatOptions options) {
         DashScopeApi api = DashScopeApi.builder().apiKey(apiKey).build();

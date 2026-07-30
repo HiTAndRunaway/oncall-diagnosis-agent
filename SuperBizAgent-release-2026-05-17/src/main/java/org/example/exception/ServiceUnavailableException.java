@@ -1,7 +1,7 @@
 package org.example.exception;
 
 /**
- * Thrown when a dependent service is unavailable.
+ * 当依赖的服务不可用时抛出。
  */
 public class ServiceUnavailableException extends BizException {
 

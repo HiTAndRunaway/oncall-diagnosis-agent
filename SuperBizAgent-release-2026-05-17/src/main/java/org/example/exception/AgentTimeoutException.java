@@ -1,7 +1,7 @@
 package org.example.exception;
 
 /**
- * Thrown when an agent execution exceeds its timeout.
+ * 当智能体执行超时时抛出。
  */
 public class AgentTimeoutException extends BizException {
 

@@ -1,7 +1,7 @@
 package org.example.dto;
 
 /**
- * Represents the result of an AIOps analysis execution.
+ * 表示 AIOps 分析执行的结果。
  */
 public class AiOpsResult {
 

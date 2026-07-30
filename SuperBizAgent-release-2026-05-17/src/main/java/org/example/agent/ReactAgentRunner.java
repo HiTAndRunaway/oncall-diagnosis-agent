@@ -44,16 +44,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Spring AI Alibaba implementation of {@link AgentRunner}.
- * Encapsulates ReactAgent / SupervisorAgent creation and execution,
- * isolating framework-specific types from the rest of the application.
+ * {@link AgentRunner} 的 Spring AI Alibaba 实现。
+ * 封装 ReactAgent / SupervisorAgent 的创建和执行，
+ * 将框架特定类型与应用程序的其他部分隔离。
  */
 @Component
 public class ReactAgentRunner implements AgentRunner {
 
     private static final Logger log = LoggerFactory.getLogger(ReactAgentRunner.class);
 
-    // ===== LLM and Tool infrastructure =====
+    // ===== LLM 和工具基础设施 =====
 
     @Autowired
     private LlmProvider llmProvider;
@@ -61,7 +61,7 @@ public class ReactAgentRunner implements AgentRunner {
     @Autowired
     private ToolCallbackProvider tools;
 
-    // ===== Core tools (always available) =====
+    // ===== 核心工具（始终可用） =====
 
     @Autowired
     private InternalDocsTools internalDocsTools;
@@ -75,7 +75,7 @@ public class ReactAgentRunner implements AgentRunner {
     @Autowired(required = false)
     private QueryLogsTools queryLogsTools;
 
-    // ===== Agentic RAG tools (only when rag.agentic.enabled=true) =====
+    // ===== Agentic RAG 工具（仅当 rag.agentic.enabled=true 时） =====
 
     @Autowired(required = false)
     private SearchKnowledgeBaseTool searchKnowledgeBaseTool;
@@ -95,7 +95,7 @@ public class ReactAgentRunner implements AgentRunner {
     @Autowired
     private AgenticRagGuard agenticRagGuard;
 
-    // ===== Memory tools (only when memory.enabled=true) =====
+    // ===== 记忆工具（仅当 memory.enabled=true 时） =====
 
     @Autowired(required = false)
     private RecallMemoryTool recallMemoryTool;
@@ -103,7 +103,7 @@ public class ReactAgentRunner implements AgentRunner {
     @Autowired(required = false)
     private ForgetMemoryTool forgetMemoryTool;
 
-    // ===== Configuration =====
+    // ===== 配置 =====
 
     @Value("${spring.ai.dashscope.api-key}")
     private String dashScopeApiKey;
@@ -117,17 +117,17 @@ public class ReactAgentRunner implements AgentRunner {
     @Value("${memory.enabled:false}")
     private boolean memoryEnabled;
 
-    // ===== AIOps evaluation =====
+    // ===== AIOps 评估 =====
 
     @Autowired(required = false)
     private org.example.agent.eval.AIOpsEvaluator aiOpsEvaluator;
 
     // ========================================================================
-    // Public API — AgentRunner interface implementation
+    // 公开 API — AgentRunner 接口实现
     // ========================================================================
 
     /**
-     * Synchronous agent execution for non-streaming chat.
+     * 用于非流式聊天的同步智能体执行。
      */
     @Override
     public String execute(String systemPrompt, String userMessage) {
@@ -145,8 +145,8 @@ public class ReactAgentRunner implements AgentRunner {
     }
 
     /**
-     * Streaming agent execution for SSE endpoints.
-     * Bridges framework StreamingOutput events to AgentEvent DTOs.
+     * 用于 SSE 端点的流式智能体执行。
+     * 将框架的 StreamingOutput 事件桥接到 AgentEvent DTO。
      */
     @Override
     public Flux<AgentEvent> executeStream(String systemPrompt, String userMessage) {
@@ -186,8 +186,8 @@ public class ReactAgentRunner implements AgentRunner {
     }
 
     /**
-     * Multi-agent AIOps orchestration via SupervisorAgent.
-     * Includes timeout control and fallback report generation.
+     * 通过 SupervisorAgent 进行多智能体 AIOps 编排。
+     * 包含超时控制和兜底报告生成。
      */
     @Override
     public AiOpsResult executeOrchestration(String taskPrompt) {
@@ -250,12 +250,12 @@ public class ReactAgentRunner implements AgentRunner {
     }
 
     // ========================================================================
-    // Private — Agent construction
+    // 私有 — 智能体构建
     // ========================================================================
 
     /**
-     * Build a standard ReactAgent for chat conversations.
-     * Migrated from ChatService.createReactAgent().
+     * 构建用于聊天对话的标准 ReactAgent。
+     * 从 ChatService.createReactAgent() 迁移而来。
      */
     private ReactAgent buildReactAgent(String systemPrompt) {
         DashScopeChatModel chatModel = buildChatModel(0.7, 2000, 0.9);
@@ -269,8 +269,8 @@ public class ReactAgentRunner implements AgentRunner {
     }
 
     /**
-     * Build the Planner Agent for AIOps orchestration.
-     * Migrated from AiOpsService.buildPlannerAgent().
+     * 构建用于 AIOps 编排的 Planner Agent。
+     * 从 AiOpsService.buildPlannerAgent() 迁移而来。
      */
     private ReactAgent buildPlannerAgent(DashScopeChatModel chatModel, ToolCallback[] toolCallbacks) {
         return ReactAgent.builder()
@@ -285,8 +285,8 @@ public class ReactAgentRunner implements AgentRunner {
     }
 
     /**
-     * Build the Executor Agent for AIOps orchestration.
-     * Migrated from AiOpsService.buildExecutorAgent().
+     * 构建用于 AIOps 编排的 Executor Agent。
+     * 从 AiOpsService.buildExecutorAgent() 迁移而来。
      */
     private ReactAgent buildExecutorAgent(DashScopeChatModel chatModel, ToolCallback[] toolCallbacks) {
         return ReactAgent.builder()
@@ -301,12 +301,12 @@ public class ReactAgentRunner implements AgentRunner {
     }
 
     // ========================================================================
-    // Private — Tool arrays
+    // 私有 — 工具数组
     // ========================================================================
 
     /**
-     * Build the full method tools array for chat agents.
-     * Migrated from ChatService.buildMethodToolsArray().
+     * 构建聊天智能体的完整方法工具数组。
+     * 从 ChatService.buildMethodToolsArray() 迁移而来。
      */
     private Object[] buildMethodToolsArray() {
         List<Object> toolList = new ArrayList<>();
@@ -335,8 +335,8 @@ public class ReactAgentRunner implements AgentRunner {
     }
 
     /**
-     * Build a simplified method tools array for AIOps agents.
-     * Migrated from AiOpsService.buildMethodToolsArray().
+     * 构建 AIOps 智能体的简化方法工具数组。
+     * 从 AiOpsService.buildMethodToolsArray() 迁移而来。
      */
     private Object[] buildAIOpsMethodToolsArray() {
         if (queryLogsTools != null) {
@@ -347,12 +347,12 @@ public class ReactAgentRunner implements AgentRunner {
     }
 
     // ========================================================================
-    // Private — Model construction
+    // 私有 — 模型构建
     // ========================================================================
 
     /**
-     * Build a DashScopeChatModel with the given parameters.
-     * Migrated from ChatService.createChatModel().
+     * 使用给定参数构建 DashScopeChatModel。
+     * 从 ChatService.createChatModel() 迁移而来。
      */
     private DashScopeChatModel buildChatModel(double temperature, int maxToken, double topP) {
         DashScopeApi api = DashScopeApi.builder().apiKey(dashScopeApiKey).build();
@@ -368,24 +368,24 @@ public class ReactAgentRunner implements AgentRunner {
     }
 
     // ========================================================================
-    // Private — MCP tool callbacks
+    // 私有 — MCP 工具回调
     // ========================================================================
 
     /**
-     * Retrieve MCP-provided tool callbacks.
-     * Migrated from ChatService.getToolCallbacks().
+     * 获取 MCP 提供的工具回调。
+     * 从 ChatService.getToolCallbacks() 迁移而来。
      */
     private ToolCallback[] getToolCallbacks() {
         return tools.getToolCallbacks();
     }
 
     // ========================================================================
-    // Private — AIOps report extraction
+    // 私有 — AIOps 报告提取
     // ========================================================================
 
     /**
-     * Extract the final report from an OverAllState.
-     * Migrated from AiOpsService.extractFinalReport().
+     * 从 OverAllState 中提取最终报告。
+     * 从 AiOpsService.extractFinalReport() 迁移而来。
      */
     private Optional<String> extractFinalReport(OverAllState state) {
         log.info("开始提取最终报告...");
@@ -403,8 +403,8 @@ public class ReactAgentRunner implements AgentRunner {
     }
 
     /**
-     * Asynchronously trigger LLM-as-Judge quality evaluation.
-     * Migrated from AiOpsService.triggerAsyncEvaluation().
+     * 异步触发 LLM-as-Judge 质量评估。
+     * 从 AiOpsService.triggerAsyncEvaluation() 迁移而来。
      */
     private void triggerAsyncEvaluation(Optional<OverAllState> stateOptional) {
         if (aiOpsEvaluator == null) {
@@ -421,13 +421,13 @@ public class ReactAgentRunner implements AgentRunner {
     }
 
     // ========================================================================
-    // Private — AIOps timeout fallback
+    // 私有 — AIOps 超时兜底
     // ========================================================================
 
     /**
-     * Generate a fallback report when AIOps analysis times out or fails.
-     * Uses a standalone LLM call without tools.
-     * Migrated from AiOpsService.forceFinalReport().
+     * 当 AIOps 分析超时或失败时生成兜底报告。
+     * 使用独立的 LLM 调用，无需工具。
+     * 从 AiOpsService.forceFinalReport() 迁移而来。
      */
     private AiOpsResult generateFallbackReport(String taskPrompt) {
         try {
@@ -464,12 +464,12 @@ public class ReactAgentRunner implements AgentRunner {
     }
 
     // ========================================================================
-    // Private — AIOps system prompts (migrated from AiOpsService)
+    // 私有 — AIOps 系统提示词（从 AiOpsService 迁移而来）
     // ========================================================================
 
     /**
-     * Build the Planner Agent system prompt.
-     * Migrated from AiOpsService.buildPlannerPrompt().
+     * 构建 Planner Agent 系统提示词。
+     * 从 AiOpsService.buildPlannerPrompt() 迁移而来。
      */
     private String buildPlannerPrompt() {
         return """
@@ -566,8 +566,8 @@ public class ReactAgentRunner implements AgentRunner {
     }
 
     /**
-     * Build the Executor Agent system prompt.
-     * Migrated from AiOpsService.buildExecutorPrompt().
+     * 构建 Executor Agent 系统提示词。
+     * 从 AiOpsService.buildExecutorPrompt() 迁移而来。
      */
     private String buildExecutorPrompt() {
         return """
@@ -589,8 +589,8 @@ public class ReactAgentRunner implements AgentRunner {
     }
 
     /**
-     * Build the Supervisor Agent system prompt.
-     * Migrated from AiOpsService.buildSupervisorSystemPrompt().
+     * 构建 Supervisor Agent 系统提示词。
+     * 从 AiOpsService.buildSupervisorSystemPrompt() 迁移而来。
      */
     private String buildSupervisorSystemPrompt() {
         return """
@@ -599,7 +599,7 @@ public class ReactAgentRunner implements AgentRunner {
                 2. 当 planner_agent 输出 decision=EXECUTE 时，调用 executor_agent 执行第一步。
                 3. 根据 executor_agent 的反馈，评估是否需要再次调用 planner_agent，直到 decision=FINISH。
                 4. FINISH 后，确保向最终用户输出完整的《告警分析报告》，格式必须严格为：
-                   告警分析报告\n---\n# 告警处理详情\n## 活跃告警清单\n## 告警根因分析N\n## 处理方案执行N\n## 结论。
+                   告警分析报告\\n---\\n# 告警处理详情\\n## 活跃告警清单\\n## 告警根因分析N\\n## 处理方案执行N\\n## 结论。
                 5. 若步骤涉及腾讯云日志/主题工具，请确保使用连字符区域 ID（ap-guangzhou 等），或省略 region 以采用默认值。
                 6. 如果发现 Planner/Executor 在同一方向连续 3 次调用工具仍失败或没有数据，必须终止流程，直接输出"任务无法完成"的报告，明确告知失败原因，严禁凭空编造结果。
 

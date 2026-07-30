@@ -5,34 +5,34 @@ import org.example.dto.AiOpsResult;
 import reactor.core.publisher.Flux;
 
 /**
- * Interface for agent execution runners.
- * Provides synchronous, streaming, and orchestration execution modes.
+ * 智能体执行运行器接口。
+ * 提供同步、流式和多智能体编排三种执行模式。
  */
 public interface AgentRunner {
 
     /**
-     * Execute an agent synchronously and return the complete response.
+     * 同步执行智能体并返回完整响应。
      *
-     * @param systemPrompt the system prompt for the agent
-     * @param userMessage  the user message / task description
-     * @return the complete agent response text
+     * @param systemPrompt 智能体的系统提示词
+     * @param userMessage  用户消息 / 任务描述
+     * @return 完整的智能体响应文本
      */
     String execute(String systemPrompt, String userMessage);
 
     /**
-     * Execute an agent in streaming mode, returning a Flux of agent events.
+     * 以流式模式执行智能体，返回 AgentEvent 的 Flux 流。
      *
-     * @param systemPrompt the system prompt for the agent
-     * @param userMessage  the user message / task description
-     * @return a reactive stream of agent events
+     * @param systemPrompt 智能体的系统提示词
+     * @param userMessage  用户消息 / 任务描述
+     * @return 智能体事件的反应式流
      */
     Flux<AgentEvent> executeStream(String systemPrompt, String userMessage);
 
     /**
-     * Execute a multi-agent AIOps orchestration and return the result.
+     * 执行多智能体 AIOps 编排并返回结果。
      *
-     * @param taskPrompt the task prompt for the AIOps analysis
-     * @return the AIOps analysis result
+     * @param taskPrompt AIOps 分析的任务提示词
+     * @return AIOps 分析结果
      */
     AiOpsResult executeOrchestration(String taskPrompt);
 }

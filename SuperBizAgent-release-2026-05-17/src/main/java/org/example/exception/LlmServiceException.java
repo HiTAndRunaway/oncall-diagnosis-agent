@@ -1,7 +1,7 @@
 package org.example.exception;
 
 /**
- * Thrown when an LLM service is unavailable or returns an error.
+ * 当LLM服务不可用或返回错误时抛出。
  */
 public class LlmServiceException extends BizException {
 

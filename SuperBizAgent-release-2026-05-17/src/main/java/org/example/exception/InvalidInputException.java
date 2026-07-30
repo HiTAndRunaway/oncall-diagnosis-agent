@@ -1,7 +1,7 @@
 package org.example.exception;
 
 /**
- * Thrown when user input is invalid or malformed.
+ * 当用户输入无效或格式错误时抛出。
  */
 public class InvalidInputException extends BizException {
 

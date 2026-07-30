@@ -1,7 +1,7 @@
 package org.example.exception;
 
 /**
- * Thrown when a requested resource cannot be found.
+ * 当请求的资源找不到时抛出。
  */
 public class ResourceNotFoundException extends BizException {
 

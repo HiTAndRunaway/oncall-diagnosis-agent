@@ -4,8 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonValue;
 
 /**
- * Represents an event emitted during agent execution, used for
- * streaming responses via SSE.
+ * 表示智能体执行过程中发出的事件，用于通过 SSE 进行流式响应。
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class AgentEvent {
@@ -53,7 +52,7 @@ public class AgentEvent {
     }
 
     /**
-     * Event type enumeration with JSON string values for serialization.
+     * 事件类型枚举，包含用于序列化的 JSON 字符串值。
      */
     public enum EventType {
         CONTENT_CHUNK("content"),
