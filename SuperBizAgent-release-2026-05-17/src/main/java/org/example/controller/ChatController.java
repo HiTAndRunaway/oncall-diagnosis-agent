@@ -9,6 +9,9 @@ import org.example.agent.router.IntentRouter;
 import org.example.agent.tool.RecallMemoryTool;
 import org.example.dto.AgentEvent;
 import org.example.dto.AiOpsResult;
+import org.example.dto.ApiResponse;
+import org.example.exception.InvalidInputException;
+import org.example.exception.ResourceNotFoundException;
 import org.example.service.AiOpsService;
 import org.example.service.ChatService;
 import org.example.service.SessionManager;
@@ -62,68 +65,60 @@ public class ChatController {
      */
     @PostMapping("/chat")
     public ResponseEntity<ApiResponse<ChatResponse>> chat(@RequestBody ChatRequest request) {
+        logger.info("收到对话请求 - SessionId: {}, Question: {}", request.getId(), request.getQuestion());
+
+        // 参数校验
+        if (request.getQuestion() == null || request.getQuestion().trim().isEmpty()) {
+            throw new InvalidInputException("问题内容不能为空");
+        }
+
+        // 意图识别路由
+        IntentResult intent = intentRouter.classify(request.getQuestion());
+        logger.info("[IntentRouter] category={} confidence={}", intent.getCategory(), intent.getConfidence());
+
+        if (intent.getCategory() == IntentCategory.ALERT_DIAGNOSIS) {
+            return handleAIOpsRoute(request);
+        }
+
+        // 从 SecurityContext 获取当前用户 ID
+        String userId = getCurrentUserId();
+        RecallMemoryTool.setCurrentUserId(userId);
         try {
-            logger.info("收到对话请求 - SessionId: {}, Question: {}", request.getId(), request.getQuestion());
 
-            // 参数校验
-            if (request.getQuestion() == null || request.getQuestion().trim().isEmpty()) {
-                logger.warn("问题内容为空");
-                return ResponseEntity.ok(ApiResponse.success(ChatResponse.error("问题内容不能为空")));
+            // 获取或创建会话
+            SessionManager.SessionContext ctx = sessionManager.getOrCreateSession(request.getId());
+            String sessionId = ctx.getSessionId();
+
+            // 决定使用摘要还是详情
+            List<Map<String, String>> history;
+            if (ctx.hasSummary()) {
+                history = Collections.emptyList(); // 摘要模式下不传原始历史
+            } else {
+                history = ctx.getHistory();
+            }
+            logger.info("会话历史消息对数: {}, 摘要模式: {}", history.size() / 2, ctx.hasSummary());
+
+            // 构建系统提示词（包含历史消息或摘要 + 用户画像）
+            String systemPrompt = chatService.buildSystemPrompt(history, ctx.getSummary(), userId);
+
+            // 意图特定的提示词调整
+            if (intent.getCategory() == IntentCategory.UNCLEAR) {
+                systemPrompt += "\n\n如果用户意图不明确，请先友好地引导用户澄清：是遇到了系统告警需要排查，还是想了解相关知识？\n";
+            } else if (intent.getCategory() == IntentCategory.KNOWLEDGE_RETRIEVAL) {
+                systemPrompt += "\n\n用户正在查询内部知识文档，请优先使用 queryInternalDocs 工具检索相关文档后回答。\n";
             }
 
-            // 意图识别路由
-            IntentResult intent = intentRouter.classify(request.getQuestion());
-            logger.info("[IntentRouter] category={} confidence={}", intent.getCategory(), intent.getConfidence());
+            // 通过 AgentRunner 执行对话
+            String fullAnswer = agentRunner.execute(systemPrompt, request.getQuestion());
 
-            if (intent.getCategory() == IntentCategory.ALERT_DIAGNOSIS) {
-                return handleAIOpsRoute(request);
-            }
+            // 更新会话历史到 Redis
+            sessionManager.addMessage(sessionId, request.getQuestion(), fullAnswer, userId);
+            logger.info("已更新会话历史 - SessionId: {}", sessionId);
 
-            // 从 SecurityContext 获取当前用户 ID
-            String userId = getCurrentUserId();
-            RecallMemoryTool.setCurrentUserId(userId);
-            try {
+            return ResponseEntity.ok(ApiResponse.success(ChatResponse.success(fullAnswer, sessionId)));
 
-                // 获取或创建会话
-                SessionManager.SessionContext ctx = sessionManager.getOrCreateSession(request.getId());
-                String sessionId = ctx.getSessionId();
-
-                // 决定使用摘要还是详情
-                List<Map<String, String>> history;
-                if (ctx.hasSummary()) {
-                    history = Collections.emptyList(); // 摘要模式下不传原始历史
-                } else {
-                    history = ctx.getHistory();
-                }
-                logger.info("会话历史消息对数: {}, 摘要模式: {}", history.size() / 2, ctx.hasSummary());
-
-                // 构建系统提示词（包含历史消息或摘要 + 用户画像）
-                String systemPrompt = chatService.buildSystemPrompt(history, ctx.getSummary(), userId);
-
-                // 意图特定的提示词调整
-                if (intent.getCategory() == IntentCategory.UNCLEAR) {
-                    systemPrompt += "\n\n如果用户意图不明确，请先友好地引导用户澄清：是遇到了系统告警需要排查，还是想了解相关知识？\n";
-                } else if (intent.getCategory() == IntentCategory.KNOWLEDGE_RETRIEVAL) {
-                    systemPrompt += "\n\n用户正在查询内部知识文档，请优先使用 queryInternalDocs 工具检索相关文档后回答。\n";
-                }
-
-                // 通过 AgentRunner 执行对话
-                String fullAnswer = agentRunner.execute(systemPrompt, request.getQuestion());
-
-                // 更新会话历史到 Redis
-                sessionManager.addMessage(sessionId, request.getQuestion(), fullAnswer, userId);
-                logger.info("已更新会话历史 - SessionId: {}", sessionId);
-
-                return ResponseEntity.ok(ApiResponse.success(ChatResponse.success(fullAnswer, sessionId)));
-
-            } finally {
-                RecallMemoryTool.clearCurrentUserId();
-            }
-
-        } catch (Exception e) {
+        } finally {
             RecallMemoryTool.clearCurrentUserId();
-            logger.error("对话失败", e);
-            return ResponseEntity.ok(ApiResponse.success(ChatResponse.error(e.getMessage())));
         }
     }
 
@@ -132,23 +127,17 @@ public class ChatController {
      */
     @PostMapping("/chat/clear")
     public ResponseEntity<ApiResponse<String>> clearChatHistory(@RequestBody ClearRequest request) {
-        try {
-            logger.info("收到清空会话历史请求 - SessionId: {}", request.getId());
+        logger.info("收到清空会话历史请求 - SessionId: {}", request.getId());
 
-            if (request.getId() == null || request.getId().isEmpty()) {
-                return ResponseEntity.ok(ApiResponse.error("会话ID不能为空"));
-            }
+        if (request.getId() == null || request.getId().isEmpty()) {
+            throw new InvalidInputException("会话ID不能为空");
+        }
 
-            if (sessionManager.sessionExists(request.getId())) {
-                sessionManager.clearSession(request.getId());
-                return ResponseEntity.ok(ApiResponse.success("会话历史已清空"));
-            } else {
-                return ResponseEntity.ok(ApiResponse.error("会话不存在"));
-            }
-
-        } catch (Exception e) {
-            logger.error("清空会话历史失败", e);
-            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
+        if (sessionManager.sessionExists(request.getId())) {
+            sessionManager.clearSession(request.getId());
+            return ResponseEntity.ok(ApiResponse.success("会话历史已清空"));
+        } else {
+            throw new ResourceNotFoundException("会话", request.getId());
         }
     }
 
@@ -162,14 +151,7 @@ public class ChatController {
 
         // 参数校验
         if (request.getQuestion() == null || request.getQuestion().trim().isEmpty()) {
-            logger.warn("问题内容为空");
-            try {
-                emitter.send(SseEmitter.event().name("message").data(SseMessage.error("问题内容不能为空"), MediaType.APPLICATION_JSON));
-                emitter.complete();
-            } catch (IOException e) {
-                emitter.completeWithError(e);
-            }
-            return emitter;
+            throw new InvalidInputException("问题内容不能为空");
         }
 
         // 意图识别路由（在主线程中执行，避免 executor 线程中调用 LLM 的复杂性）
@@ -220,7 +202,7 @@ public class ChatController {
                                         fullAnswerBuilder.append(chunk);
                                         emitter.send(SseEmitter.event()
                                                 .name("message")
-                                                .data(SseMessage.content(chunk), MediaType.APPLICATION_JSON));
+                                                .data(AgentEvent.content(chunk), MediaType.APPLICATION_JSON));
                                         logger.debug("发送流式内容: {}", chunk);
                                     }
                                 }
@@ -249,7 +231,7 @@ public class ChatController {
                         try {
                             emitter.send(SseEmitter.event()
                                     .name("message")
-                                    .data(SseMessage.error(error.getMessage()), MediaType.APPLICATION_JSON));
+                                    .data(AgentEvent.error(error.getMessage()), MediaType.APPLICATION_JSON));
                         } catch (IOException ex) {
                             logger.error("发送错误消息失败", ex);
                         }
@@ -270,7 +252,7 @@ public class ChatController {
                             // 发送完成标记（包含 sessionId）
                             emitter.send(SseEmitter.event()
                                     .name("message")
-                                    .data(SseMessage.done(sessionId), MediaType.APPLICATION_JSON));
+                                    .data(AgentEvent.done(sessionId), MediaType.APPLICATION_JSON));
                             emitter.complete();
                         } catch (IOException e) {
                             logger.error("发送完成消息失败", e);
@@ -285,7 +267,7 @@ public class ChatController {
             try {
                 emitter.send(SseEmitter.event()
                         .name("message")
-                        .data(SseMessage.error(e.getMessage()), MediaType.APPLICATION_JSON));
+                        .data(AgentEvent.error(e.getMessage()), MediaType.APPLICATION_JSON));
             } catch (IOException ex) {
                 logger.error("发送错误消息失败", ex);
             }
@@ -307,14 +289,14 @@ public class ChatController {
             try {
                 logger.info("收到 AI 智能运维请求 - 启动多 Agent 协作流程");
 
-                emitter.send(SseEmitter.event().name("message").data(SseMessage.content("正在读取告警并拆解任务...\n")));
+                emitter.send(SseEmitter.event().name("message").data(AgentEvent.content("正在读取告警并拆解任务...\n")));
 
                 // 调用 AiOpsService 执行分析流程（Agent 构建由 AgentRunner 处理）
                 AiOpsResult result = aiOpsService.executeAiOpsAnalysis();
 
                 if (!result.isSuccess() && result.getFinalReport() == null) {
                     emitter.send(SseEmitter.event().name("message")
-                            .data(SseMessage.error(result.getErrorMessage() != null
+                            .data(AgentEvent.error(result.getErrorMessage() != null
                                     ? result.getErrorMessage()
                                     : "多 Agent 编排未获取到有效结果"), MediaType.APPLICATION_JSON));
                     emitter.complete();
@@ -333,11 +315,11 @@ public class ChatController {
 
                     // 发送分隔线
                     emitter.send(SseEmitter.event().name("message")
-                            .data(SseMessage.content("\n\n" + "=".repeat(60) + "\n"), MediaType.APPLICATION_JSON));
+                            .data(AgentEvent.content("\n\n" + "=".repeat(60) + "\n"), MediaType.APPLICATION_JSON));
 
                     // 发送完整的告警分析报告
                     emitter.send(SseEmitter.event().name("message")
-                            .data(SseMessage.content("📋 **告警分析报告**\n\n"), MediaType.APPLICATION_JSON));
+                            .data(AgentEvent.content("📋 **告警分析报告**\n\n"), MediaType.APPLICATION_JSON));
 
                     int chunkSize = 50;
                     for (int i = 0; i < finalReportText.length(); i += chunkSize) {
@@ -345,21 +327,21 @@ public class ChatController {
                         String chunk = finalReportText.substring(i, end);
 
                         emitter.send(SseEmitter.event().name("message")
-                                .data(SseMessage.content(chunk), MediaType.APPLICATION_JSON));
+                                .data(AgentEvent.content(chunk), MediaType.APPLICATION_JSON));
                     }
 
                     // 发送结束分隔线
                     emitter.send(SseEmitter.event().name("message")
-                            .data(SseMessage.content("\n" + "=".repeat(60) + "\n\n"), MediaType.APPLICATION_JSON));
+                            .data(AgentEvent.content("\n" + "=".repeat(60) + "\n\n"), MediaType.APPLICATION_JSON));
 
                     logger.info("最终报告已完整输出");
                 } else {
                     logger.warn("未能提取到最终报告");
                     emitter.send(SseEmitter.event().name("message")
-                            .data(SseMessage.content("⚠️ 多 Agent 流程已完成，但未能生成最终报告。"), MediaType.APPLICATION_JSON));
+                            .data(AgentEvent.content("⚠️ 多 Agent 流程已完成，但未能生成最终报告。"), MediaType.APPLICATION_JSON));
                 }
 
-                emitter.send(SseEmitter.event().name("message").data(SseMessage.done(), MediaType.APPLICATION_JSON));
+                emitter.send(SseEmitter.event().name("message").data(AgentEvent.done(null), MediaType.APPLICATION_JSON));
                 emitter.complete();
                 logger.info("AI Ops 多 Agent 编排完成");
 
@@ -367,7 +349,7 @@ public class ChatController {
                 logger.error("AI Ops 多 Agent 协作失败", e);
                 try {
                     emitter.send(SseEmitter.event().name("message")
-                            .data(SseMessage.error("AI Ops 流程失败: " + e.getMessage()), MediaType.APPLICATION_JSON));
+                            .data(AgentEvent.error("AI Ops 流程失败: " + e.getMessage()), MediaType.APPLICATION_JSON));
                 } catch (IOException ex) {
                     logger.error("发送错误消息失败", ex);
                 }
@@ -384,31 +366,24 @@ public class ChatController {
      * 当 IntentRouter 分类为 ALERT_DIAGNOSIS 时调用
      */
     private ResponseEntity<ApiResponse<ChatResponse>> handleAIOpsRoute(ChatRequest request) {
-        try {
-            logger.info("[AIOps Route] 路由到 AIOps 分析流程 - Question: {}", request.getQuestion());
+        logger.info("[AIOps Route] 路由到 AIOps 分析流程 - Question: {}", request.getQuestion());
 
-            AiOpsResult result = aiOpsService.executeAiOpsAnalysis();
+        AiOpsResult result = aiOpsService.executeAiOpsAnalysis();
 
-            if (!result.isSuccess() && result.getFinalReport() == null) {
-                return ResponseEntity.ok(ApiResponse.success(
-                        ChatResponse.error(result.getErrorMessage() != null
-                                ? result.getErrorMessage()
-                                : "AIOps 分析未能获取有效结果，请稍后重试")));
-            }
-
-            Optional<String> reportOptional = aiOpsService.extractFinalReport(result);
-            if (reportOptional.isPresent()) {
-                return ResponseEntity.ok(ApiResponse.success(
-                        ChatResponse.success(reportOptional.get(), request.getId())));
-            } else {
-                return ResponseEntity.ok(ApiResponse.success(
-                        ChatResponse.error("AIOps 流程已完成，但未能生成最终报告")));
-            }
-
-        } catch (Exception e) {
-            logger.error("[AIOps Route] 分析失败", e);
+        if (!result.isSuccess() && result.getFinalReport() == null) {
             return ResponseEntity.ok(ApiResponse.success(
-                    ChatResponse.error("AIOps 分析失败: " + e.getMessage())));
+                    ChatResponse.error(result.getErrorMessage() != null
+                            ? result.getErrorMessage()
+                            : "AIOps 分析未能获取有效结果，请稍后重试")));
+        }
+
+        Optional<String> reportOptional = aiOpsService.extractFinalReport(result);
+        if (reportOptional.isPresent()) {
+            return ResponseEntity.ok(ApiResponse.success(
+                    ChatResponse.success(reportOptional.get(), request.getId())));
+        } else {
+            return ResponseEntity.ok(ApiResponse.success(
+                    ChatResponse.error("AIOps 流程已完成，但未能生成最终报告")));
         }
     }
 
@@ -422,13 +397,13 @@ public class ChatController {
                 logger.info("[AIOps Route SSE] 路由到 AIOps 流式分析流程");
 
                 emitter.send(SseEmitter.event().name("message")
-                        .data(SseMessage.content("正在读取告警并拆解任务...\n"), MediaType.APPLICATION_JSON));
+                        .data(AgentEvent.content("正在读取告警并拆解任务...\n"), MediaType.APPLICATION_JSON));
 
                 AiOpsResult result = aiOpsService.executeAiOpsAnalysis();
 
                 if (!result.isSuccess() && result.getFinalReport() == null) {
                     emitter.send(SseEmitter.event().name("message")
-                            .data(SseMessage.error(result.getErrorMessage() != null
+                            .data(AgentEvent.error(result.getErrorMessage() != null
                                     ? result.getErrorMessage()
                                     : "AIOps 分析未能获取有效结果"), MediaType.APPLICATION_JSON));
                     emitter.complete();
@@ -440,25 +415,25 @@ public class ChatController {
                 if (reportOptional.isPresent()) {
                     String report = reportOptional.get();
                     emitter.send(SseEmitter.event().name("message")
-                            .data(SseMessage.content("\n\n" + "=".repeat(60) + "\n"), MediaType.APPLICATION_JSON));
+                            .data(AgentEvent.content("\n\n" + "=".repeat(60) + "\n"), MediaType.APPLICATION_JSON));
                     emitter.send(SseEmitter.event().name("message")
-                            .data(SseMessage.content("📋 **告警分析报告**\n\n"), MediaType.APPLICATION_JSON));
+                            .data(AgentEvent.content("📋 **告警分析报告**\n\n"), MediaType.APPLICATION_JSON));
 
                     int chunkSize = 50;
                     for (int i = 0; i < report.length(); i += chunkSize) {
                         int end = Math.min(i + chunkSize, report.length());
                         emitter.send(SseEmitter.event().name("message")
-                                .data(SseMessage.content(report.substring(i, end)), MediaType.APPLICATION_JSON));
+                                .data(AgentEvent.content(report.substring(i, end)), MediaType.APPLICATION_JSON));
                     }
 
                     emitter.send(SseEmitter.event().name("message")
-                            .data(SseMessage.content("\n" + "=".repeat(60) + "\n\n"), MediaType.APPLICATION_JSON));
+                            .data(AgentEvent.content("\n" + "=".repeat(60) + "\n\n"), MediaType.APPLICATION_JSON));
                 } else {
                     emitter.send(SseEmitter.event().name("message")
-                            .data(SseMessage.content("⚠️ 流程已完成，但未能生成最终报告。"), MediaType.APPLICATION_JSON));
+                            .data(AgentEvent.content("⚠️ 流程已完成，但未能生成最终报告。"), MediaType.APPLICATION_JSON));
                 }
 
-                emitter.send(SseEmitter.event().name("message").data(SseMessage.done(), MediaType.APPLICATION_JSON));
+                emitter.send(SseEmitter.event().name("message").data(AgentEvent.done(null), MediaType.APPLICATION_JSON));
                 emitter.complete();
                 logger.info("[AIOps Route SSE] 流式分析完成");
 
@@ -466,7 +441,7 @@ public class ChatController {
                 logger.error("[AIOps Route SSE] 分析失败", e);
                 try {
                     emitter.send(SseEmitter.event().name("message")
-                            .data(SseMessage.error("AIOps 分析失败: " + e.getMessage()), MediaType.APPLICATION_JSON));
+                            .data(AgentEvent.error("AIOps 分析失败: " + e.getMessage()), MediaType.APPLICATION_JSON));
                 } catch (IOException ex) {
                     logger.error("发送错误消息失败", ex);
                 }
@@ -480,34 +455,28 @@ public class ChatController {
      */
     @GetMapping("/chat/session/{sessionId}")
     public ResponseEntity<ApiResponse<SessionInfoResponse>> getSessionInfo(@PathVariable String sessionId) {
-        try {
-            logger.info("收到获取会话信息请求 - SessionId: {}", sessionId);
+        logger.info("收到获取会话信息请求 - SessionId: {}", sessionId);
 
-            // 前端展示用：仅查详情层，不查摘要层
-            List<Map<String, String>> history = sessionManager.getHistoryOnly(sessionId);
-            if (!history.isEmpty()) {
-                SessionInfoResponse response = new SessionInfoResponse();
-                response.setSessionId(sessionId);
-                response.setMessagePairCount(history.size() / 2);
-                response.setMessages(history);
-                return ResponseEntity.ok(ApiResponse.success(response));
-            }
+        // 前端展示用：仅查详情层，不查摘要层
+        List<Map<String, String>> history = sessionManager.getHistoryOnly(sessionId);
+        if (!history.isEmpty()) {
+            SessionInfoResponse response = new SessionInfoResponse();
+            response.setSessionId(sessionId);
+            response.setMessagePairCount(history.size() / 2);
+            response.setMessages(history);
+            return ResponseEntity.ok(ApiResponse.success(response));
+        }
 
-            // 详情层为空，查一下元数据看是否存在
-            SessionManager.SessionMeta meta = sessionManager.getSessionMeta(sessionId);
-            if (meta != null) {
-                SessionInfoResponse response = new SessionInfoResponse();
-                response.setSessionId(sessionId);
-                response.setMessagePairCount(meta.getMessagePairCount());
-                response.setCreateTime(meta.getCreateTime());
-                return ResponseEntity.ok(ApiResponse.success(response));
-            } else {
-                return ResponseEntity.ok(ApiResponse.error("会话不存在"));
-            }
-
-        } catch (Exception e) {
-            logger.error("获取会话信息失败", e);
-            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
+        // 详情层为空，查一下元数据看是否存在
+        SessionManager.SessionMeta meta = sessionManager.getSessionMeta(sessionId);
+        if (meta != null) {
+            SessionInfoResponse response = new SessionInfoResponse();
+            response.setSessionId(sessionId);
+            response.setMessagePairCount(meta.getMessagePairCount());
+            response.setCreateTime(meta.getCreateTime());
+            return ResponseEntity.ok(ApiResponse.success(response));
+        } else {
+            throw new ResourceNotFoundException("会话", sessionId);
         }
     }
 
@@ -551,8 +520,6 @@ public class ChatController {
         private String Id;
     }
 
-    // ==================== 内部类 ====================
-
     /**
      * 会话信息响应
      */
@@ -591,71 +558,5 @@ public class ChatController {
             response.setErrorMessage(errorMessage);
             return response;
         }
-    }
-
-    /**
-     * 统一 SSE 流式消息格式
-     * 适用于所有 SSE 流式返回模式的对话接口
-     */
-    @Setter
-    @Getter
-    public static class SseMessage {
-        private String type;  // content: 内容块, error: 错误, done: 完成
-        private String data;
-        private String sessionId;
-
-        public static SseMessage content(String data) {
-            SseMessage message = new SseMessage();
-            message.setType("content");
-            message.setData(data);
-            return message;
-        }
-
-        public static SseMessage error(String errorMessage) {
-            SseMessage message = new SseMessage();
-            message.setType("error");
-            message.setData(errorMessage);
-            return message;
-        }
-
-        public static SseMessage done(String sessionId) {
-            SseMessage message = new SseMessage();
-            message.setType("done");
-            message.setData(null);
-            message.setSessionId(sessionId);
-            return message;
-        }
-
-        public static SseMessage done() {
-            SseMessage message = new SseMessage();
-            message.setType("done");
-            message.setData(null);
-            return message;
-        }
-    }
-
-
-    @Getter
-    @Setter
-    public static class ApiResponse<T> {
-        private int code;
-        private String message;
-        private T data;
-
-        public static <T> ApiResponse<T> success(T data) {
-            ApiResponse<T> response = new ApiResponse<>();
-            response.setCode(200);
-            response.setMessage("success");
-            response.setData(data);
-            return response;
-        }
-
-        public static <T> ApiResponse<T> error(String message) {
-            ApiResponse<T> response = new ApiResponse<>();
-            response.setCode(500);
-            response.setMessage(message);
-            return response;
-        }
-
     }
 }
