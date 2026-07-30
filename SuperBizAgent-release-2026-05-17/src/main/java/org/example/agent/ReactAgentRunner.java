@@ -114,6 +114,14 @@ public class ReactAgentRunner implements AgentRunner {
     @Value("${rag.agentic.enabled:false}")
     private boolean agenticRagEnabled;
 
+    @Value("${memory.enabled:false}")
+    private boolean memoryEnabled;
+
+    // ===== AIOps evaluation =====
+
+    @Autowired(required = false)
+    private org.example.agent.eval.AIOpsEvaluator aiOpsEvaluator;
+
     // ========================================================================
     // Public API — AgentRunner interface implementation
     // ========================================================================
@@ -217,6 +225,9 @@ public class ReactAgentRunner implements AgentRunner {
             Optional<OverAllState> state = future.get(totalTimeoutSeconds, TimeUnit.SECONDS);
             log.info("AIOps Agent 编排正常完成");
 
+            // 异步触发 LLM-as-Judge 质量评估
+            triggerAsyncEvaluation(state);
+
             if (state.isPresent()) {
                 Optional<String> report = extractFinalReport(state.get());
                 if (report.isPresent()) {
@@ -315,8 +326,10 @@ public class ReactAgentRunner implements AgentRunner {
             if (getSearchCapabilitiesTool != null) toolList.add(getSearchCapabilitiesTool);
         }
 
-        if (recallMemoryTool != null) toolList.add(recallMemoryTool);
-        if (forgetMemoryTool != null) toolList.add(forgetMemoryTool);
+        if (memoryEnabled) {
+            if (recallMemoryTool != null) toolList.add(recallMemoryTool);
+            if (forgetMemoryTool != null) toolList.add(forgetMemoryTool);
+        }
 
         return toolList.toArray();
     }
@@ -386,6 +399,24 @@ public class ReactAgentRunner implements AgentRunner {
         } else {
             log.warn("未能提取到 Planner 最终报告");
             return Optional.empty();
+        }
+    }
+
+    /**
+     * Asynchronously trigger LLM-as-Judge quality evaluation.
+     * Migrated from AiOpsService.triggerAsyncEvaluation().
+     */
+    private void triggerAsyncEvaluation(Optional<OverAllState> stateOptional) {
+        if (aiOpsEvaluator == null) {
+            return;
+        }
+        try {
+            stateOptional.ifPresent(state -> {
+                Optional<String> report = extractFinalReport(state);
+                report.ifPresent(r -> aiOpsEvaluator.evaluateAsync(null, r));
+            });
+        } catch (Exception e) {
+            log.warn("[AIOps] 触发评估失败（不影响主流程）: {}", e.getMessage());
         }
     }
 
