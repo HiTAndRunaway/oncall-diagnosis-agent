@@ -1,5 +1,9 @@
 package org.example.controller;
 
+import org.example.dto.ApiResponse;
+import org.example.exception.InvalidInputException;
+import org.example.exception.ResourceNotFoundException;
+import org.example.exception.ServiceUnavailableException;
 import org.example.service.MemoryManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,79 +35,82 @@ public class MemoryController {
      * 获取用户所有记忆面板数据（按类型分组）
      */
     @GetMapping("/panel")
-    public ResponseEntity<Map<String, Object>> getMemoryPanel() {
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getMemoryPanel() {
 
         String userId = getCurrentUserId();
         logger.info("获取记忆面板 - userId={}", userId);
 
         if (userId == null || userId.isEmpty()) {
-            Map<String, Object> error = new LinkedHashMap<>();
-            error.put("success", false);
-            error.put("message", "userId is required");
-            return ResponseEntity.badRequest().body(error);
+            throw new InvalidInputException("userId is required");
         }
 
-        try {
-            Map<String, List<MemoryManager.MemoryResult>> grouped =
-                    memoryManager.getAllMemories(userId);
+        Map<String, List<MemoryManager.MemoryResult>> grouped =
+                memoryManager.getAllMemories(userId);
 
-            Map<String, Object> response = new LinkedHashMap<>();
-            response.put("success", true);
-            response.put("userId", userId);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("success", true);
+        response.put("userId", userId);
 
-            response.put("facts", formatForFrontend(
-                    grouped.getOrDefault("facts", Collections.emptyList())));
-            response.put("profiles", formatForFrontend(
-                    grouped.getOrDefault("profiles", Collections.emptyList())));
-            response.put("preferences", formatForFrontend(
-                    grouped.getOrDefault("preferences", Collections.emptyList())));
+        response.put("facts", formatForFrontend(
+                grouped.getOrDefault("facts", Collections.emptyList())));
+        response.put("profiles", formatForFrontend(
+                grouped.getOrDefault("profiles", Collections.emptyList())));
+        response.put("preferences", formatForFrontend(
+                grouped.getOrDefault("preferences", Collections.emptyList())));
 
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            logger.error("获取记忆面板失败", e);
-            Map<String, Object> error = new LinkedHashMap<>();
-            error.put("success", false);
-            error.put("message", "获取记忆失败: " + e.getMessage());
-            return ResponseEntity.internalServerError().body(error);
-        }
+        return ResponseEntity.ok(ApiResponse.success(response));
     }
 
     /**
      * 删除单条记忆
      */
     @DeleteMapping("/{memoryId}")
-    public ResponseEntity<Map<String, Object>> deleteMemory(
+    public ResponseEntity<ApiResponse<Map<String, Object>>> deleteMemory(
             @PathVariable("memoryId") String memoryId) {
 
         String userId = getCurrentUserId();
         logger.info("删除记忆 - userId={}, memoryId={}", userId, memoryId);
 
-        boolean success = memoryManager.deleteMemory(userId, memoryId);
+        try {
+            boolean success = memoryManager.deleteMemory(userId, memoryId);
 
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("success", success);
-        response.put("message", success ? "记忆已删除" : "删除失败");
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("success", success);
+            response.put("message", success ? "记忆已删除" : "删除失败");
 
-        return ResponseEntity.ok(response);
+            if (!success) {
+                throw new ResourceNotFoundException("记忆", memoryId);
+            }
+
+            return ResponseEntity.ok(ApiResponse.success(response));
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ServiceUnavailableException("记忆删除", e.getMessage());
+        }
     }
 
     /**
      * 清空用户所有记忆
      */
     @DeleteMapping("/clear")
-    public ResponseEntity<Map<String, Object>> clearMemories() {
+    public ResponseEntity<ApiResponse<Map<String, Object>>> clearMemories() {
 
         String userId = getCurrentUserId();
         logger.info("清空记忆 - userId={}", userId);
 
-        long deleted = memoryManager.deleteAllMemories(userId);
+        try {
+            long deleted = memoryManager.deleteAllMemories(userId);
 
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("success", true);
-        response.put("message", "已清空全部记忆");
-        response.put("deletedCount", deleted);
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("success", true);
+            response.put("message", "已清空全部记忆");
+            response.put("deletedCount", deleted);
 
-        return ResponseEntity.ok(response);
+            return ResponseEntity.ok(ApiResponse.success(response));
+        } catch (Exception e) {
+            throw new ServiceUnavailableException("清空记忆", e.getMessage());
+        }
     }
 
     /**

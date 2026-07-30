@@ -5,9 +5,12 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.ModelAndView;
+
+import java.util.UUID;
 
 @Component
 public class LogInterceptor implements HandlerInterceptor {
@@ -17,6 +20,7 @@ public class LogInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        MDC.put("requestId", UUID.randomUUID().toString().replace("-", ""));
         long startTime = System.currentTimeMillis();
         request.setAttribute(START_TIME_ATTR, startTime);
 
@@ -59,6 +63,7 @@ public class LogInterceptor implements HandlerInterceptor {
         }
 
         request.removeAttribute(START_TIME_ATTR);
+        MDC.remove("requestId");
     }
 
     /**

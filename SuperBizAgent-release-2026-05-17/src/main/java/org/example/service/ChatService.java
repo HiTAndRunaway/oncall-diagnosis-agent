@@ -1,27 +1,10 @@
 package org.example.service;
 
-import com.alibaba.cloud.ai.dashscope.api.DashScopeApi;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
-import com.alibaba.cloud.ai.graph.agent.ReactAgent;
-import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
-import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
-import org.example.agent.tool.DateTimeTools;
-import org.example.agent.tool.DecomposeQuestionTool;
-import org.example.agent.tool.EvaluateSearchResultsTool;
 import org.example.agent.tool.ForgetMemoryTool;
-import org.example.agent.tool.GetSearchCapabilitiesTool;
-import org.example.agent.tool.InternalDocsTools;
-import org.example.agent.tool.QueryLogsTools;
-import org.example.agent.tool.QueryMetricsTools;
 import org.example.agent.tool.RecallMemoryTool;
-import org.example.agent.tool.RefineQueryTool;
-import org.example.agent.tool.SearchKnowledgeBaseTool;
 import org.example.config.MemoryProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.tool.ToolCallback;
-import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -31,50 +14,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 聊天服务
- * 封装 ReactAgent 对话的公共逻辑，包括模型创建、系统提示词构建、Agent 配置等
+ * 聊天服务 — 纯业务逻辑层
+ * 负责系统提示词构建与记忆注入，不涉及 Agent 创建/执行/模型实例化。
+ * Agent 创建与执行已迁移至 {@link org.example.agent.AgentRunner} 实现。
  */
 @Service
 public class ChatService {
 
     private static final Logger logger = LoggerFactory.getLogger(ChatService.class);
-
-    @Autowired
-    private InternalDocsTools internalDocsTools;
-
-    @Autowired
-    private DateTimeTools dateTimeTools;
-
-    @Autowired
-    private QueryMetricsTools queryMetricsTools;
-
-    @Autowired(required = false)  // Mock 模式下才注册，所以设置为 optional,真实环境通过mcp配置注入
-    private QueryLogsTools queryLogsTools;
-
-    // ===== Agentic RAG 工具（仅在 rag.agentic.enabled=true 时注册为 Bean） =====
-    @Autowired(required = false)
-    private SearchKnowledgeBaseTool searchKnowledgeBaseTool;
-
-    @Autowired(required = false)
-    private EvaluateSearchResultsTool evaluateSearchResultsTool;
-
-    @Autowired(required = false)
-    private RefineQueryTool refineQueryTool;
-
-    @Autowired(required = false)
-    private DecomposeQuestionTool decomposeQuestionTool;
-
-    @Autowired(required = false)
-    private GetSearchCapabilitiesTool getSearchCapabilitiesTool;
-
-    @Autowired
-    private AgenticRagGuard agenticRagGuard;
-
-    @Autowired
-    private ToolCallbackProvider tools;
-
-    @Value("${spring.ai.dashscope.api-key}")
-    private String dashScopeApiKey;
 
     @Value("${rag.agentic.enabled:false}")
     private boolean agenticRagEnabled;
@@ -99,43 +46,10 @@ public class ChatService {
     private ForgetMemoryTool forgetMemoryTool;
 
     /**
-     * 创建 DashScope API 实例
-     */
-    public DashScopeApi createDashScopeApi() {
-        return DashScopeApi.builder()
-                .apiKey(dashScopeApiKey)
-                .build();
-    }
-
-    /**
-     * 创建 ChatModel
-     * @param temperature 控制随机性 (0.0-1.0)
-     * @param maxToken 最大输出长度
-     * @param topP 核采样参数
-     */
-    public DashScopeChatModel createChatModel(DashScopeApi dashScopeApi, double temperature, int maxToken, double topP) {
-        return DashScopeChatModel.builder()
-                .dashScopeApi(dashScopeApi)
-                .defaultOptions(DashScopeChatOptions.builder()
-                        .withModel(DashScopeChatModel.DEFAULT_MODEL_NAME)
-                        .withTemperature(temperature)
-                        .withMaxToken(maxToken)
-                        .withTopP(topP)
-                        .build())
-                .build();
-    }
-
-    /**
-     * 创建标准对话 ChatModel（默认参数）
-     */
-    public DashScopeChatModel createStandardChatModel(DashScopeApi dashScopeApi) {
-        return createChatModel(dashScopeApi, 0.7, 2000, 0.9);
-    }
-
-    /**
      * 构建系统提示词（包含历史消息或摘要）
      * @param history 历史消息列表（摘要模式下为 emptyList）
      * @param summary 对话摘要（可为 null）
+     * @param userId  当前用户 ID
      * @return 完整的系统提示词
      */
     public String buildSystemPrompt(List<Map<String, String>> history, String summary, String userId) {
@@ -200,100 +114,6 @@ public class ChatService {
      */
     public String buildSystemPrompt(List<Map<String, String>> history) {
         return buildSystemPrompt(history, null, null);
-    }
-
-    /**
-     * 动态构建方法工具数组
-     * 根据 cls.mock-enabled 决定是否包含 QueryLogsTools
-     * 根据 rag.agentic.enabled 决定是否包含 Agentic RAG 工具
-     */
-    public Object[] buildMethodToolsArray() {
-        List<Object> toolList = new ArrayList<>();
-        toolList.add(dateTimeTools);
-        toolList.add(internalDocsTools);
-        toolList.add(queryMetricsTools);
-
-        if (queryLogsTools != null) {
-            toolList.add(queryLogsTools);
-        }
-
-        // Agentic RAG 工具（仅在 enabled 时注册为 Bean，所以需判空）
-        if (agenticRagEnabled) {
-            if (searchKnowledgeBaseTool != null) toolList.add(searchKnowledgeBaseTool);
-            if (evaluateSearchResultsTool != null) toolList.add(evaluateSearchResultsTool);
-            if (refineQueryTool != null) toolList.add(refineQueryTool);
-            if (decomposeQuestionTool != null) toolList.add(decomposeQuestionTool);
-            if (getSearchCapabilitiesTool != null) toolList.add(getSearchCapabilitiesTool);
-        }
-
-        // 记忆工具（仅在 memory.enabled 时注册）
-        if (memoryEnabled) {
-            if (recallMemoryTool != null) toolList.add(recallMemoryTool);
-            if (forgetMemoryTool != null) toolList.add(forgetMemoryTool);
-        }
-
-        return toolList.toArray();
-    }
-
-    /**
-     * 获取工具回调列表，mcp服务提供的工具
-     */
-    public ToolCallback[] getToolCallbacks() {
-        return tools.getToolCallbacks();
-    }
-
-    /**
-     * 记录可用工具列表：mcp服务提供的工具
-     */
-    public void logAvailableTools() {
-        ToolCallback[] toolCallbacks = tools.getToolCallbacks();
-        logger.info("可用工具列表:");
-        for (ToolCallback toolCallback : toolCallbacks) {
-            logger.info(">>> {}", toolCallback.getToolDefinition().name());
-        }
-    }
-
-    /**
-     * 创建 ReactAgent
-     * @param chatModel 聊天模型
-     * @param systemPrompt 系统提示词
-     * @return 配置好的 ReactAgent
-     */
-    public ReactAgent createReactAgent(DashScopeChatModel chatModel, String systemPrompt) {
-        return ReactAgent.builder()
-                .name("intelligent_assistant")
-                .model(chatModel)
-                .systemPrompt(systemPrompt)
-                .methodTools(buildMethodToolsArray())
-                .tools(getToolCallbacks())
-                .build();
-    }
-
-    /**
-     * 执行 ReactAgent 对话（非流式）
-     * @param agent ReactAgent 实例
-     * @param question 用户问题
-     * @return AI 回复
-     */
-    @CircuitBreaker(name = "dashscope-llm", fallbackMethod = "chatFallback")
-    public String executeChat(ReactAgent agent, String question) throws GraphRunnerException {
-        // 重置 Agentic RAG 检索轮次计数器
-        agenticRagGuard.reset();
-        logger.info("执行 ReactAgent.call() - 自动处理工具调用");
-        var response = agent.call(question);
-        String answer = response.getText();
-        logger.info("ReactAgent 对话完成，答案长度: {}", answer.length());
-        return answer;
-    }
-
-    /**
-     * LLM 断路器降级方法
-     * 当 DashScope LLM 调用失败或断路器打开时，返回友好错误提示
-     */
-    private String chatFallback(ReactAgent agent, String question, Throwable t) {
-        logger.warn("[CircuitBreaker] LLM 服务降级 - question前50字符: {}, error: {}",
-            question.substring(0, Math.min(50, question.length())), t.getMessage());
-        return "AI 服务暂时不可用，请稍后重试。系统已自动熔断保护，预计 30 秒后恢复。";
     }
 
     /**
