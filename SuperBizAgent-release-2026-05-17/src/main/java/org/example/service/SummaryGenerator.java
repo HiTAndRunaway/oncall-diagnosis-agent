@@ -7,6 +7,7 @@ import org.example.config.SessionRedisProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -33,6 +34,9 @@ public class SummaryGenerator {
 
     @Autowired
     private SessionRedisProperties props;
+
+    @Value("${spring.ai.dashscope.api-key}")
+    private String dashScopeApiKey;
 
     /**
      * 异步触发摘要生成
@@ -105,7 +109,9 @@ public class SummaryGenerator {
      */
     private String generateSummary(String prompt) {
         try {
-            DashScopeApi dashScopeApi = chatService.createDashScopeApi();
+            DashScopeApi dashScopeApi = DashScopeApi.builder()
+                    .apiKey(dashScopeApiKey)
+                    .build();
 
             String modelName = props.getSummary().getModel();
             DashScopeChatModel chatModel = DashScopeChatModel.builder()
