@@ -25,7 +25,7 @@ public class AiOpsResult {
     }
 
     public static AiOpsResult timeoutFallback(String report) {
-        return new AiOpsResult(false, report, 0, true, null);
+        return new AiOpsResult(true, report, 0, true, null);
     }
 
     public static AiOpsResult failed(String errorMessage) {

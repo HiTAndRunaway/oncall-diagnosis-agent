@@ -1,16 +1,10 @@
 package org.example.service;
 
 import org.example.agent.AgentRunner;
-import org.example.agent.tool.DateTimeTools;
-import org.example.agent.tool.InternalDocsTools;
-import org.example.agent.tool.QueryLogsTools;
-import org.example.agent.tool.QueryMetricsTools;
-import org.example.agent.eval.AIOpsEvaluator;
 import org.example.dto.AiOpsResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
@@ -27,24 +21,6 @@ public class AiOpsService {
 
     @Autowired
     private AgentRunner agentRunner;
-
-    @Autowired
-    private DateTimeTools dateTimeTools;
-
-    @Autowired
-    private InternalDocsTools internalDocsTools;
-
-    @Autowired
-    private QueryMetricsTools queryMetricsTools;
-
-    @Autowired(required = false)  // Mock 模式下才注册
-    private QueryLogsTools queryLogsTools;
-
-    @Autowired(required = false)
-    private AIOpsEvaluator aiOpsEvaluator;
-
-    @Value("${aiops.total-timeout-seconds:300}")
-    private int totalTimeoutSeconds;
 
     /**
      * 执行 AI Ops 告警分析流程
@@ -69,23 +45,5 @@ public class AiOpsService {
             return Optional.of(result.getFinalReport());
         }
         return Optional.empty();
-    }
-
-    /**
-     * 异步触发 LLM-as-Judge 质量评估
-     * 保留用于外部手动触发评估的场景；
-     * 正常流程中评估已在 AgentRunner 内部自动完成。
-     */
-    private void triggerAsyncEvaluation(AiOpsResult result) {
-        if (aiOpsEvaluator == null) {
-            return;
-        }
-        try {
-            if (result.isSuccess() && result.getFinalReport() != null) {
-                aiOpsEvaluator.evaluateAsync(null, result.getFinalReport());
-            }
-        } catch (Exception e) {
-            logger.warn("[AIOps] 触发评估失败（不影响主流程）: {}", e.getMessage());
-        }
     }
 }

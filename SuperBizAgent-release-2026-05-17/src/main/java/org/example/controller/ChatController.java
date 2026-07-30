@@ -149,9 +149,17 @@ public class ChatController {
     public SseEmitter chatStream(@RequestBody ChatRequest request) {
         SseEmitter emitter = new SseEmitter(300000L); // 5分钟超时
 
-        // 参数校验
+        // 参数校验 — SSE 端点不能抛异常，必须发送 SSE error 事件并关闭 emitter
         if (request.getQuestion() == null || request.getQuestion().trim().isEmpty()) {
-            throw new InvalidInputException("问题内容不能为空");
+            logger.warn("问题内容为空");
+            try {
+                emitter.send(SseEmitter.event().name("message")
+                        .data(AgentEvent.error("问题内容不能为空"), MediaType.APPLICATION_JSON));
+                emitter.complete();
+            } catch (IOException e) {
+                emitter.completeWithError(e);
+            }
+            return emitter;
         }
 
         // 意图识别路由（在主线程中执行，避免 executor 线程中调用 LLM 的复杂性）
