@@ -290,3 +290,14 @@ ai:
 # ==================== Prompt 管理配置 ====================
 prompts:
   default-lang: zh
+
+# ==================== SpringDoc OpenAPI 配置 ====================
+springdoc:
+  api-docs:
+    path: /api/v1/docs/json
+  swagger-ui:
+    path: /api/v1/docs/ui
+    tags-sorter: alpha
+    operations-sorter: method
+  default-produces-media-type: application/json
+  show-actuator: false
