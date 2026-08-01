@@ -30,6 +30,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
@@ -79,7 +80,7 @@ public class ChatV1Controller {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "503", description = "LLM 服务暂不可用")
     })
     @PostMapping("/chat")
-    public ResponseEntity<ApiResponse<ChatResponse>> chat(@RequestBody ChatRequest request) {
+    public ResponseEntity<ApiResponse<ChatResponse>> chat(@Valid @RequestBody ChatRequest request) {
         logger.info("收到对话请求 - SessionId: {}, Question: {}", request.getId(), request.getQuestion());
 
         // 参数校验
@@ -140,7 +141,7 @@ public class ChatV1Controller {
      */
     @Operation(summary = "流式对话", description = "SSE 流式输出 AI 回复，支持实时工具调用状态反馈")
     @PostMapping(value = "/chat_stream", produces = "text/event-stream;charset=UTF-8")
-    public SseEmitter chatStream(@RequestBody ChatRequest request) {
+    public SseEmitter chatStream(@Valid @RequestBody ChatRequest request) {
         SseEmitter emitter = new SseEmitter(300000L); // 5分钟超时
 
         if (request.getQuestion() == null || request.getQuestion().trim().isEmpty()) {

@@ -240,10 +240,10 @@ superbiz:
     default-capacity: 100                    # 默认令牌桶容量
     default-refill-rate: 10                  # 默认每分钟补充令牌数
     endpoints:                               # 按端点路径的限流规则
-      /api/chat:
+      /api/v1/chat:
         capacity: 30
         refill-rate: 5
-      /api/chat_stream:
+      /api/v1/chat_stream:
         capacity: 10
         refill-rate: 2
 

@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -39,7 +40,7 @@ public class AuthV1Controller {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "API Key 无效或缺失")
     })
     @PostMapping("/login")
-    public ResponseEntity<ApiResponse<LoginResult>> login(@RequestBody LoginRequest request) {
+    public ResponseEntity<ApiResponse<LoginResult>> login(@Valid @RequestBody LoginRequest request) {
         if (request.getApiKey() == null || request.getApiKey().isEmpty()) {
             return ResponseEntity.status(401).body(ApiResponse.error(401, "API Key is required"));
         }

@@ -1,6 +1,5 @@
 package org.example.config;
 
-import io.milvus.client.MilvusServiceClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,9 +28,6 @@ public class FeatureFlagStartupChecker {
 
     @Autowired(required = false)
     private StringRedisTemplate redisTemplate;
-
-    @Autowired(required = false)
-    private MilvusServiceClient milvusClient;
 
     @EventListener(ApplicationReadyEvent.class)
     public void check() {
