@@ -2,11 +2,13 @@ package org.example.service;
 
 import org.example.agent.AgentRunner;
 import org.example.dto.AiOpsResult;
+import org.example.service.PromptManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -22,6 +24,9 @@ public class AiOpsService {
     @Autowired
     private AgentRunner agentRunner;
 
+    @Autowired
+    private PromptManager promptManager;
+
     /**
      * 执行 AI Ops 告警分析流程
      * 所有 Agent 构建和执行已委托给 AgentRunner
@@ -30,7 +35,7 @@ public class AiOpsService {
      */
     public AiOpsResult executeAiOpsAnalysis() {
         logger.info("开始执行 AI Ops 多 Agent 协作流程");
-        String taskPrompt = "你是企业级 SRE，接到了自动化告警排查任务。请结合工具调用，执行**规划→执行→再规划**的闭环，并最终按照固定模板输出《告警分析报告》。禁止编造虚假数据，如连续多次查询失败需诚实反馈无法完成的原因。";
+        String taskPrompt = promptManager.render("aiops/task-prompt", Map.of(), "zh");
         return agentRunner.executeOrchestration(taskPrompt);
     }
 
