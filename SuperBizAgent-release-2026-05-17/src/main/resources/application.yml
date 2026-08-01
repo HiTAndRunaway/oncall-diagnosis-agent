@@ -286,3 +286,7 @@ ai:
       temperature: 0.3
       max-token: 500
       top-p: 0.9
+
+# ==================== Prompt 管理配置 ====================
+prompts:
+  default-lang: zh
