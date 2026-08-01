@@ -3,6 +3,7 @@ package org.example.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.config.MemoryProperties;
+import org.example.config.ModelProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,6 +34,9 @@ public class MemoryExtractor {
 
     @Autowired
     private MemoryProperties memoryProperties;
+
+    @Autowired
+    private ModelProperties modelProperties;
 
     @Autowired
     private StringRedisTemplate redisTemplate;
@@ -105,8 +109,7 @@ public class MemoryExtractor {
         String extractionPrompt = buildExtractionPrompt(existingSummary, conversationText);
 
         // 4. 调用轻量 LLM 提取
-        String model = memoryProperties.getExtraction().getModel();
-        String llmResponse = callLlm(model, "你是一个记忆提取器。", extractionPrompt);
+        String llmResponse = callLlm("你是一个记忆提取器。", extractionPrompt);
 
         if (llmResponse == null || llmResponse.trim().isEmpty()) {
             logger.debug("LLM 返回空，无法提取记忆");
@@ -236,7 +239,7 @@ public class MemoryExtractor {
             输出 JSON: {"action": "UPDATE|MERGE|NEW", "reason": "..."}
             """, oldContent, oldConf * 100, newContent, newConf * 100);
 
-        String response = callLlm("qwen-turbo", "你是一个记忆冲突判断器。", prompt);
+        String response = callLlm("你是一个记忆冲突判断器。", prompt);
         if (response == null) return "NEW"; // 超时默认 NEW
 
         String json = extractJson(response);
@@ -261,13 +264,15 @@ public class MemoryExtractor {
             输出合并后的记忆文本（仅输出文本，不要 JSON）。
             """, oldContent, newContent);
 
-        String response = callLlm("qwen-turbo", "你是一个信息整合器。", prompt);
+        String response = callLlm("你是一个信息整合器。", prompt);
         return response != null ? response.trim() : (oldContent + "；" + newContent);
     }
 
-    private String callLlm(String model, String systemPrompt, String userMessage) {
+    private String callLlm(String systemPrompt, String userMessage) {
         try {
-            return llmClient.callWithSystemPrompt(model, systemPrompt, userMessage, 0.3, 2000);
+            ModelProperties.ModelConfig cfg = modelProperties.getLightweight();
+            return llmClient.callWithSystemPrompt(cfg.getName(), systemPrompt, userMessage,
+                    cfg.getTemperature(), cfg.getMaxToken());
         } catch (Exception e) {
             logger.warn("LLM 调用失败: {}", e.getMessage());
             return null;
