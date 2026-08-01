@@ -83,7 +83,7 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
-        <!-- JSR-303 Bean Validation (jakarta.validation) -->
+        <!-- JSR-303 Bean Validation（jakarta.validation 校验） -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
@@ -221,6 +221,12 @@
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
                             <version>1.18.30</version>
+                        </path>
+                        <!-- 生成 spring-configuration-metadata.json（@ConfigurationProperties 元数据） -->
+                        <path>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-configuration-processor</artifactId>
+                            <version>3.2.0</version>
                         </path>
                     </annotationProcessorPaths>
                 </configuration>
