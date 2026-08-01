@@ -1,7 +1,7 @@
 // SuperBizAgent 前端应用
 class SuperBizAgentApp {
     constructor() {
-        this.apiBaseUrl = 'http://localhost:9900/api';
+        this.apiBaseUrl = 'http://localhost:9900/api/v1';
         this.currentMode = 'quick'; // 'quick' 或 'stream'
         this.sessionId = this.generateSessionId();
         this.isStreaming = false;
@@ -1607,7 +1607,7 @@ class SuperBizAgentApp {
 
     async loadMemoryPanel() {
         try {
-            const resp = await this.authFetch('/api/memory/panel');
+            const resp = await this.authFetch('/api/v1/memory/panel');
             const data = await resp.json();
             if (!data.success) return;
 
@@ -1681,7 +1681,7 @@ class SuperBizAgentApp {
     async deleteMemory(memoryId) {
         if (!confirm('确定要删除这条记忆吗？')) return;
         try {
-            const resp = await this.authFetch(`/api/memory/${encodeURIComponent(memoryId)}`, { method: 'DELETE' });
+            const resp = await this.authFetch(`/api/v1/memory/${encodeURIComponent(memoryId)}`, { method: 'DELETE' });
             const data = await resp.json();
             if (data.success) {
                 await this.loadMemoryPanel();

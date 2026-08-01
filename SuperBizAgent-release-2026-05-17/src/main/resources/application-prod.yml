@@ -18,3 +18,10 @@ superbiz:
         - "*"
   rate-limit:
     enabled: true
+
+# SpringDoc OpenAPI - prod 环境禁用 API 文档与 Swagger UI
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

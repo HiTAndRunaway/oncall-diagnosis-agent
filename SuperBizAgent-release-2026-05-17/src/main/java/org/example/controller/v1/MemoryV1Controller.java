@@ -1,5 +1,7 @@
-package org.example.controller;
+package org.example.controller.v1;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.example.dto.ApiResponse;
 import org.example.exception.InvalidInputException;
 import org.example.exception.ResourceNotFoundException;
@@ -18,15 +20,16 @@ import org.springframework.web.bind.annotation.*;
 import java.util.*;
 
 /**
- * 记忆管理 REST API
+ * 记忆管理 V1 REST API
  * 提供前端「我的记忆」面板的数据查询、删除操作
  */
+@Tag(name = "记忆管理", description = "用户长短期记忆的查询与删除接口")
 @RestController
-@RequestMapping("/api/memory")
+@RequestMapping("/api/v1/memory")
 @ConditionalOnProperty(prefix = "memory", name = "enabled", havingValue = "true")
-public class MemoryController {
+public class MemoryV1Controller {
 
-    private static final Logger logger = LoggerFactory.getLogger(MemoryController.class);
+    private static final Logger logger = LoggerFactory.getLogger(MemoryV1Controller.class);
 
     @Autowired
     private MemoryManager memoryManager;
@@ -34,9 +37,9 @@ public class MemoryController {
     /**
      * 获取用户所有记忆面板数据（按类型分组）
      */
+    @Operation(summary = "获取记忆面板", description = "按类型分组返回当前用户的所有记忆数据")
     @GetMapping("/panel")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getMemoryPanel() {
-
         String userId = getCurrentUserId();
         logger.info("获取记忆面板 - userId={}", userId);
 
@@ -64,10 +67,10 @@ public class MemoryController {
     /**
      * 删除单条记忆
      */
+    @Operation(summary = "删除单条记忆", description = "根据记忆ID删除指定记忆")
     @DeleteMapping("/{memoryId}")
     public ResponseEntity<ApiResponse<Map<String, Object>>> deleteMemory(
             @PathVariable("memoryId") String memoryId) {
-
         String userId = getCurrentUserId();
         logger.info("删除记忆 - userId={}, memoryId={}", userId, memoryId);
 
@@ -93,9 +96,9 @@ public class MemoryController {
     /**
      * 清空用户所有记忆
      */
+    @Operation(summary = "清空全部记忆", description = "删除当前用户的所有记忆数据")
     @DeleteMapping("/clear")
     public ResponseEntity<ApiResponse<Map<String, Object>>> clearMemories() {
-
         String userId = getCurrentUserId();
         logger.info("清空记忆 - userId={}", userId);
 
@@ -115,7 +118,6 @@ public class MemoryController {
 
     /**
      * 从 SecurityContext 获取当前用户 ID
-     * 安全关闭时返回 "anonymous" 以保持向后兼容
      */
     private String getCurrentUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();

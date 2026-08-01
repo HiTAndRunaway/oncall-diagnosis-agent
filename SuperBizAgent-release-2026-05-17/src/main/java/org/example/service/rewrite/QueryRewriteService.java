@@ -4,6 +4,7 @@ import com.alibaba.cloud.ai.dashscope.api.DashScopeApi;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import jakarta.annotation.PostConstruct;
+import org.example.config.ModelProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,15 +38,18 @@ public class QueryRewriteService {
     private final QueryRewriteProperties properties;
     private final StringRedisTemplate redisTemplate;
     private final String dashscopeApiKey;
+    private final ModelProperties modelProperties;
 
     private QueryRewriteStrategy strategy;
 
     public QueryRewriteService(QueryRewriteProperties properties,
                                StringRedisTemplate redisTemplate,
-                               @Value("${dashscope.api.key}") String dashscopeApiKey) {
+                               @Value("${dashscope.api.key}") String dashscopeApiKey,
+                               ModelProperties modelProperties) {
         this.properties = properties;
         this.redisTemplate = redisTemplate;
         this.dashscopeApiKey = dashscopeApiKey;
+        this.modelProperties = modelProperties;
     }
 
     @PostConstruct
@@ -253,10 +257,10 @@ public class QueryRewriteService {
         return DashScopeChatModel.builder()
                 .dashScopeApi(api)
                 .defaultOptions(DashScopeChatOptions.builder()
-                        .withModel(properties.getModel())
-                        .withTemperature(0.3)
-                        .withMaxToken(500)
-                        .withTopP(0.9)
+                        .withModel(modelProperties.getRewrite().getName())
+                        .withTemperature(modelProperties.getRewrite().getTemperature())
+                        .withMaxToken(modelProperties.getRewrite().getMaxToken())
+                        .withTopP(modelProperties.getRewrite().getTopP())
                         .build())
                 .build();
     }

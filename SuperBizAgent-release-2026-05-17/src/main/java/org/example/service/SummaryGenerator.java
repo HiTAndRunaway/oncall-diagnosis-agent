@@ -3,6 +3,7 @@ package org.example.service;
 import com.alibaba.cloud.ai.dashscope.api.DashScopeApi;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
+import org.example.config.ModelProperties;
 import org.example.config.SessionRedisProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +35,9 @@ public class SummaryGenerator {
 
     @Autowired
     private SessionRedisProperties props;
+
+    @Autowired
+    private ModelProperties modelProperties;
 
     @Value("${spring.ai.dashscope.api-key}")
     private String dashScopeApiKey;
@@ -113,14 +117,14 @@ public class SummaryGenerator {
                     .apiKey(dashScopeApiKey)
                     .build();
 
-            String modelName = props.getSummary().getModel();
+            ModelProperties.ModelConfig cfg = modelProperties.getLightweight();
             DashScopeChatModel chatModel = DashScopeChatModel.builder()
                     .dashScopeApi(dashScopeApi)
                     .defaultOptions(DashScopeChatOptions.builder()
-                            .withModel(modelName)
-                            .withTemperature(0.3)  // 低温度，更确定性的输出
-                            .withMaxToken(1000)
-                            .withTopP(0.9)
+                            .withModel(cfg.getName())
+                            .withTemperature(cfg.getTemperature())
+                            .withMaxToken(cfg.getMaxToken())
+                            .withTopP(cfg.getTopP())
                             .build())
                     .build();
 
