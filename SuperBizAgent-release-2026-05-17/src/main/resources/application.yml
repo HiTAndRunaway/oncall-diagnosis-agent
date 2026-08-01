@@ -240,9 +240,64 @@ superbiz:
     default-capacity: 100                    # 默认令牌桶容量
     default-refill-rate: 10                  # 默认每分钟补充令牌数
     endpoints:                               # 按端点路径的限流规则
-      /api/chat:
+      /api/v1/chat:
         capacity: 30
         refill-rate: 5
-      /api/chat_stream:
+      /api/v1/chat_stream:
         capacity: 10
         refill-rate: 2
+
+# ==================== 分层模型配置 ====================
+ai:
+  model:
+    chat:
+      name: qwen3-max
+      temperature: 0.7
+      max-token: 2000
+      top-p: 0.9
+    aiops:
+      supervisor:
+        name: qwen3-max
+        temperature: 0.3
+        max-token: 8000
+        top-p: 0.9
+      planner:
+        name: qwen3-max
+        temperature: 0.3
+        max-token: 8000
+        top-p: 0.9
+      executor:
+        name: qwen-turbo
+        temperature: 0.3
+        max-token: 4000
+        top-p: 0.9
+    lightweight:
+      name: qwen-turbo
+      temperature: 0.3
+      max-token: 2000
+      top-p: 0.9
+    reasoning:
+      name: qwen3-max
+      temperature: 0.3
+      max-token: 4000
+      top-p: 0.9
+    rewrite:
+      name: qwen-turbo
+      temperature: 0.3
+      max-token: 500
+      top-p: 0.9
+
+# ==================== Prompt 管理配置 ====================
+prompts:
+  default-lang: zh
+
+# ==================== SpringDoc OpenAPI 配置 ====================
+springdoc:
+  api-docs:
+    path: /api/v1/docs/json
+  swagger-ui:
+    path: /api/v1/docs/ui
+    tags-sorter: alpha
+    operations-sorter: method
+  default-produces-media-type: application/json
+  show-actuator: false

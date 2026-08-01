@@ -19,10 +19,12 @@ import org.example.agent.tool.QueryMetricsTools;
 import org.example.agent.tool.RecallMemoryTool;
 import org.example.agent.tool.RefineQueryTool;
 import org.example.agent.tool.SearchKnowledgeBaseTool;
+import org.example.config.ModelProperties;
 import org.example.dto.AgentEvent;
 import org.example.dto.AiOpsResult;
 import org.example.exception.LlmServiceException;
 import org.example.service.AgenticRagGuard;
+import org.example.service.PromptManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -35,6 +37,7 @@ import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -104,6 +107,12 @@ public class ReactAgentRunner implements AgentRunner {
     private ForgetMemoryTool forgetMemoryTool;
 
     // ===== Configuration =====
+
+    @Autowired
+    private ModelProperties modelProperties;
+
+    @Autowired
+    private PromptManager promptManager;
 
     @Value("${spring.ai.dashscope.api-key}")
     private String dashScopeApiKey;
@@ -193,21 +202,22 @@ public class ReactAgentRunner implements AgentRunner {
     public AiOpsResult executeOrchestration(String taskPrompt) {
         log.info("开始执行 AI Ops 多 Agent 协作流程");
 
-        DashScopeChatModel chatModel = buildChatModel(0.3, 8000, 0.9);
         ToolCallback[] toolCallbacks = getToolCallbacks();
 
-        ReactAgent plannerAgent = buildPlannerAgent(chatModel, toolCallbacks);
-        ReactAgent executorAgent = buildExecutorAgent(chatModel, toolCallbacks);
+        // 各 Agent 使用独立模型，不再共用一个 chatModel
+        ReactAgent plannerAgent = buildPlannerAgent(toolCallbacks);
+        ReactAgent executorAgent = buildExecutorAgent(toolCallbacks);
 
+        DashScopeChatModel supervisorModel = buildChatModel(modelProperties.getAiops().getSupervisor());
         SupervisorAgent supervisorAgent = SupervisorAgent.builder()
                 .name("ai_ops_supervisor")
                 .description("负责调度 Planner 与 Executor 的多 Agent 控制器")
-                .model(chatModel)
+                .model(supervisorModel)
                 .systemPrompt(buildSupervisorSystemPrompt())
                 .subAgents(List.of(plannerAgent, executorAgent))
                 .build();
 
-        String fullTaskPrompt = "你是企业级 SRE，接到了自动化告警排查任务。请结合工具调用，执行**规划→执行→再规划**的闭环，并最终按照固定模板输出《告警分析报告》。禁止编造虚假数据，如连续多次查询失败需诚实反馈无法完成的原因。";
+        String fullTaskPrompt = promptManager.render("aiops/task-prompt", Map.of(), "zh");
 
         log.info("调用 Supervisor Agent 开始编排，超时限制: {} 秒", totalTimeoutSeconds);
 
@@ -258,7 +268,7 @@ public class ReactAgentRunner implements AgentRunner {
      * Migrated from ChatService.createReactAgent().
      */
     private ReactAgent buildReactAgent(String systemPrompt) {
-        DashScopeChatModel chatModel = buildChatModel(0.7, 2000, 0.9);
+        DashScopeChatModel chatModel = buildChatModel(modelProperties.getChat());
         return ReactAgent.builder()
                 .name("intelligent_assistant")
                 .model(chatModel)
@@ -272,11 +282,12 @@ public class ReactAgentRunner implements AgentRunner {
      * Build the Planner Agent for AIOps orchestration.
      * Migrated from AiOpsService.buildPlannerAgent().
      */
-    private ReactAgent buildPlannerAgent(DashScopeChatModel chatModel, ToolCallback[] toolCallbacks) {
+    private ReactAgent buildPlannerAgent(ToolCallback[] toolCallbacks) {
+        DashScopeChatModel plannerModel = buildChatModel(modelProperties.getAiops().getPlanner());
         return ReactAgent.builder()
                 .name("planner_agent")
                 .description("负责拆解告警、规划与再规划步骤")
-                .model(chatModel)
+                .model(plannerModel)
                 .systemPrompt(buildPlannerPrompt())
                 .methodTools(buildAIOpsMethodToolsArray())
                 .tools(toolCallbacks)
@@ -288,11 +299,12 @@ public class ReactAgentRunner implements AgentRunner {
      * Build the Executor Agent for AIOps orchestration.
      * Migrated from AiOpsService.buildExecutorAgent().
      */
-    private ReactAgent buildExecutorAgent(DashScopeChatModel chatModel, ToolCallback[] toolCallbacks) {
+    private ReactAgent buildExecutorAgent(ToolCallback[] toolCallbacks) {
+        DashScopeChatModel executorModel = buildChatModel(modelProperties.getAiops().getExecutor());
         return ReactAgent.builder()
                 .name("executor_agent")
                 .description("负责执行 Planner 的首个步骤并及时反馈")
-                .model(chatModel)
+                .model(executorModel)
                 .systemPrompt(buildExecutorPrompt())
                 .methodTools(buildAIOpsMethodToolsArray())
                 .tools(toolCallbacks)
@@ -351,20 +363,26 @@ public class ReactAgentRunner implements AgentRunner {
     // ========================================================================
 
     /**
-     * Build a DashScopeChatModel with the given parameters.
-     * Migrated from ChatService.createChatModel().
+     * Build a DashScopeChatModel from a {@link ModelProperties.ModelConfig}.
      */
-    private DashScopeChatModel buildChatModel(double temperature, int maxToken, double topP) {
+    private DashScopeChatModel buildChatModel(ModelProperties.ModelConfig config) {
         DashScopeApi api = DashScopeApi.builder().apiKey(dashScopeApiKey).build();
         return DashScopeChatModel.builder()
                 .dashScopeApi(api)
                 .defaultOptions(DashScopeChatOptions.builder()
-                        .withModel(DashScopeChatModel.DEFAULT_MODEL_NAME)
-                        .withTemperature(temperature)
-                        .withMaxToken(maxToken)
-                        .withTopP(topP)
+                        .withModel(config.getName())
+                        .withTemperature(config.getTemperature())
+                        .withMaxToken(config.getMaxToken())
+                        .withTopP(config.getTopP())
                         .build())
                 .build();
+    }
+
+    /**
+     * Build a DashScopeChatModel using the default chat configuration.
+     */
+    private DashScopeChatModel buildChatModel() {
+        return buildChatModel(modelProperties.getChat());
     }
 
     // ========================================================================
@@ -431,30 +449,11 @@ public class ReactAgentRunner implements AgentRunner {
      */
     private AiOpsResult generateFallbackReport(String taskPrompt) {
         try {
-            String forcePrompt = String.format("""
-                    你是一个企业级 SRE。之前的自动化分析流程因超时被中断。
-                    请基于以下原始告警信息，结合你的专业知识，生成一份简要的告警分析报告。
-
-                    原始告警信息：
-                    %s
-
-                    请按以下格式输出：
-                    # 告警分析报告（超时终止 - 基于知识推断）
-
-                    ---
-
-                    ## 告警概述
-
-                    ## 可能的根因分析（标注为"推断"而非确认）
-
-                    ## 建议的排查步骤
-
-                    ## 重要提醒
-                    本报告因自动化分析超时而基于专家知识推断生成，未经过完整的工具调用验证，建议人工介入排查。
-                    """, taskPrompt);
+            String forcePrompt = promptManager.render("aiops/fallback-report",
+                    Map.of("taskPrompt", taskPrompt), "zh");
 
             String report = llmProvider.chat("你是一个企业级 SRE。", forcePrompt,
-                    LlmProvider.ChatOptions.aiOps(DashScopeChatModel.DEFAULT_MODEL_NAME));
+                    LlmProvider.ChatOptions.aiOps(modelProperties.getAiops().getPlanner().getName()));
             log.info("兜底报告生成成功，长度: {}", report != null ? report.length() : 0);
             return AiOpsResult.timeoutFallback(report);
         } catch (Exception e) {
@@ -472,97 +471,7 @@ public class ReactAgentRunner implements AgentRunner {
      * Migrated from AiOpsService.buildPlannerPrompt().
      */
     private String buildPlannerPrompt() {
-        return """
-                你是 Planner Agent，同时承担 Replanner 角色，负责：
-                1. 读取当前输入任务 {input} 以及 Executor 的最近反馈 {executor_feedback}。
-                2. 分析 Prometheus 告警、日志、内部文档等信息，制定可执行的下一步步骤。
-                3. 在执行阶段，输出 JSON，包含 decision (PLAN|EXECUTE|FINISH)、step 描述、预期要调用的工具、以及必要的上下文。
-                4. 调用任何腾讯云日志/主题相关工具时，region 参数必须使用连字符格式（如 ap-guangzhou），若不确定请省略以使用默认值。
-                5. 严格禁止编造数据，只能引用工具返回的真实内容；如果连续 3 次调用同一工具仍失败或返回空结果，需停止该方向并在最终报告的结论部分说明"无法完成"的原因。
-
-                ## 最终报告输出要求（CRITICAL）
-
-                当 decision=FINISH 时，你必须：
-                1. **不要输出 JSON 格式**
-                2. **直接输出完整的 Markdown 格式报告文本**
-                3. **报告必须严格遵循以下模板**：
-
-                ```
-                # 告警分析报告
-
-                ---
-
-                ## 📋 活跃告警清单
-
-                | 告警名称 | 级别 | 目标服务 | 首次触发时间 | 最新触发时间 | 状态 |
-                |---------|------|----------|-------------|-------------|------|
-                | [告警1名称] | [级别] | [服务名] | [时间] | [时间] | 活跃 |
-                | [告警2名称] | [级别] | [服务名] | [时间] | [时间] | 活跃 |
-
-                ---
-
-                ## 🔍 告警根因分析1 - [告警名称]
-
-                ### 告警详情
-                - **告警级别**: [级别]
-                - **受影响服务**: [服务名]
-                - **持续时间**: [X分钟]
-
-                ### 症状描述
-                [根据监控指标描述症状]
-
-                ### 日志证据
-                [引用查询到的关键日志]
-
-                ### 根因结论
-                [基于证据得出的根本原因]
-
-                ---
-
-                ## 🛠️ 处理方案执行1 - [告警名称]
-
-                ### 已执行的排查步骤
-                1. [步骤1]
-                2. [步骤2]
-
-                ### 处理建议
-                [给出具体的处理建议]
-
-                ### 预期效果
-                [说明预期的效果]
-
-                ---
-
-                ## 🔍 告警根因分析2 - [告警名称]
-                [如果有第2个告警，重复上述格式]
-
-                ---
-
-                ## 📊 结论
-
-                ### 整体评估
-                [总结所有告警的整体情况]
-
-                ### 关键发现
-                - [发现1]
-                - [发现2]
-
-                ### 后续建议
-                1. [建议1]
-                2. [建议2]
-
-                ### 风险评估
-                [评估当前风险等级和影响范围]
-                ```
-
-                **重要提醒**：
-                - 最终输出必须是纯 Markdown 文本，不要包含 JSON 结构
-                - 不要使用 "finalReport": "..." 这样的格式
-                - 直接从 "# 告警分析报告" 开始输出
-                - 所有内容必须基于工具查询的真实数据，严禁编造
-                - 如果某个步骤失败，在结论中如实说明，不要跳过
-
-                """;
+        return promptManager.render("aiops/planner-prompt", Map.of(), "zh");
     }
 
     /**
@@ -570,22 +479,7 @@ public class ReactAgentRunner implements AgentRunner {
      * Migrated from AiOpsService.buildExecutorPrompt().
      */
     private String buildExecutorPrompt() {
-        return """
-                你是 Executor Agent，负责读取 Planner 最新输出 {planner_plan}，只执行其中的第一步。
-                - 确认步骤所需的工具与参数，尤其是 region 参数要使用连字符格式（ap-guangzhou）；若 Planner 未给出则使用默认区域。
-                - 调用相应的工具并收集结果，如工具返回错误或空数据，需要将失败原因、请求参数一并记录，并停止进一步调用该工具（同一工具失败达到 3 次时应直接返回 FAILED）。
-                - 将日志、指标、文档等证据整理成结构化摘要，标注对应的告警名称或资源，方便 Planner 填充"告警根因分析 / 处理方案执行"章节。
-                - 以 JSON 形式返回执行状态、证据以及给 Planner 的建议，写入 executor_feedback，严禁编造未实际查询到的内容。
-
-
-                输出示例：
-                {
-                  "status": "SUCCESS",
-                  "summary": "近1小时未见 error 日志，仅有 info",
-                  "evidence": "...",
-                  "nextHint": "建议转向高占用进程"
-                }
-                """;
+        return promptManager.render("aiops/executor-prompt", Map.of(), "zh");
     }
 
     /**
@@ -593,18 +487,6 @@ public class ReactAgentRunner implements AgentRunner {
      * Migrated from AiOpsService.buildSupervisorSystemPrompt().
      */
     private String buildSupervisorSystemPrompt() {
-        return """
-                你是 AI Ops Supervisor，负责调度 planner_agent 与 executor_agent：
-                1. 当需要拆解任务或重新制定策略时，调用 planner_agent。
-                2. 当 planner_agent 输出 decision=EXECUTE 时，调用 executor_agent 执行第一步。
-                3. 根据 executor_agent 的反馈，评估是否需要再次调用 planner_agent，直到 decision=FINISH。
-                4. FINISH 后，确保向最终用户输出完整的《告警分析报告》，格式必须严格为：
-                   告警分析报告\n---\n# 告警处理详情\n## 活跃告警清单\n## 告警根因分析N\n## 处理方案执行N\n## 结论。
-                5. 若步骤涉及腾讯云日志/主题工具，请确保使用连字符区域 ID（ap-guangzhou 等），或省略 region 以采用默认值。
-                6. 如果发现 Planner/Executor 在同一方向连续 3 次调用工具仍失败或没有数据，必须终止流程，直接输出"任务无法完成"的报告，明确告知失败原因，严禁凭空编造结果。
-
-                只允许在 planner_agent、executor_agent 与 FINISH 之间做出选择。
-
-                """;
+        return promptManager.render("aiops/supervisor-prompt", Map.of(), "zh");
     }
 }

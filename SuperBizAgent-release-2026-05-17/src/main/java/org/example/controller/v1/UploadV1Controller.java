@@ -1,7 +1,9 @@
-package org.example.controller;
+package org.example.controller.v1;
 
 import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import org.example.config.FileUploadConfig;
 import org.example.dto.ApiResponse;
@@ -15,6 +17,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
@@ -25,10 +28,16 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 
+/**
+ * 文件上传 V1 控制器
+ * 提供文件上传与向量化索引接口
+ */
+@Tag(name = "文件上传", description = "文件上传、向量化索引与失败重索引接口")
 @RestController
-public class FileUploadController {
+@RequestMapping("/api/v1")
+public class UploadV1Controller {
 
-    private static final Logger logger = LoggerFactory.getLogger(FileUploadController.class);
+    private static final Logger logger = LoggerFactory.getLogger(UploadV1Controller.class);
 
     private static final long MAX_FILE_SIZE_BYTES = 20L * 1024 * 1024; // 20MB
 
@@ -41,9 +50,10 @@ public class FileUploadController {
     @Autowired
     private RateLimiterRegistry rateLimiterRegistry;
 
-    @PostMapping(value = "/api/upload", consumes = "multipart/form-data")
+    @Operation(summary = "上传文件", description = "上传文件并自动创建向量索引，支持覆盖更新")
+    @PostMapping(value = "/upload", consumes = "multipart/form-data")
     public ResponseEntity<ApiResponse<FileUploadRes>> upload(@RequestParam("file") MultipartFile file,
-                                    HttpServletRequest request) {
+                                                              HttpServletRequest request) {
         if (file.isEmpty()) {
             throw new InvalidInputException("文件不能为空");
         }
@@ -78,7 +88,6 @@ public class FileUploadController {
                 Files.createDirectories(uploadDir);
             }
 
-            // 使用原始文件名，而不是UUID，以便实现基于文件名的去重
             Path filePath = uploadDir.resolve(originalFilename).normalize();
 
             // 如果文件已存在，先删除旧文件（实现覆盖更新）
@@ -116,9 +125,9 @@ public class FileUploadController {
 
     /**
      * 重索引失败文档端点
-     * 委托 VectorIndexService 查询并重新向量化 needsReindex=true 的文档
      */
-    @PostMapping("/api/upload/reindex-failed")
+    @Operation(summary = "重索引失败文档", description = "查询并重新向量化所有需要重索引的文档")
+    @PostMapping("/upload/reindex-failed")
     public ResponseEntity<ApiResponse<Map<String, Object>>> reindexFailed() {
         VectorIndexService.ReindexResult result = vectorIndexService.reindexFailedDocuments();
         return ResponseEntity.ok(ApiResponse.success(result.toMap()));
@@ -126,7 +135,6 @@ public class FileUploadController {
 
     /**
      * 获取客户端真实 IP
-     * 优先级: X-Forwarded-For > X-Real-IP > RemoteAddr
      */
     private String getClientIp(HttpServletRequest request) {
         String xff = request.getHeader("X-Forwarded-For");

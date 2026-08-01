@@ -4,6 +4,7 @@ import com.alibaba.cloud.ai.dashscope.api.DashScopeApi;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import org.example.config.DashScopeApiProperties;
 import org.example.exception.LlmServiceException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,7 +12,7 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
@@ -26,8 +27,8 @@ public class DashScopeLlmProvider implements LlmProvider {
 
     private static final Logger log = LoggerFactory.getLogger(DashScopeLlmProvider.class);
 
-    @Value("${spring.ai.dashscope.api-key}")
-    private String apiKey;
+    @Autowired
+    private DashScopeApiProperties dashScopeApiProperties;
 
     @Override
     @CircuitBreaker(name = "dashscope-llm", fallbackMethod = "chatFallback")
@@ -70,7 +71,7 @@ public class DashScopeLlmProvider implements LlmProvider {
      * Build a DashScopeChatModel from the given options.
      */
     private DashScopeChatModel buildModel(ChatOptions options) {
-        DashScopeApi api = DashScopeApi.builder().apiKey(apiKey).build();
+        DashScopeApi api = DashScopeApi.builder().apiKey(dashScopeApiProperties.getKey()).build();
         return DashScopeChatModel.builder()
                 .dashScopeApi(api)
                 .defaultOptions(DashScopeChatOptions.builder()

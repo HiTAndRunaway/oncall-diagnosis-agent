@@ -6,3 +6,8 @@ superbiz:
       - key: "dev-api-key-change-me"
         user-id: "admin"
         description: "Development-only API key (example)"
+
+# SpringDoc OpenAPI - dev 环境启用 Swagger UI
+springdoc:
+  swagger-ui:
+    enabled: true
