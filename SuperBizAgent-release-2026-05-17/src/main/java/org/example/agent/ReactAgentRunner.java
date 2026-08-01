@@ -19,6 +19,7 @@ import org.example.agent.tool.QueryMetricsTools;
 import org.example.agent.tool.RecallMemoryTool;
 import org.example.agent.tool.RefineQueryTool;
 import org.example.agent.tool.SearchKnowledgeBaseTool;
+import org.example.config.ModelProperties;
 import org.example.dto.AgentEvent;
 import org.example.dto.AiOpsResult;
 import org.example.exception.LlmServiceException;
@@ -104,6 +105,9 @@ public class ReactAgentRunner implements AgentRunner {
     private ForgetMemoryTool forgetMemoryTool;
 
     // ===== Configuration =====
+
+    @Autowired
+    private ModelProperties modelProperties;
 
     @Value("${spring.ai.dashscope.api-key}")
     private String dashScopeApiKey;
@@ -193,16 +197,17 @@ public class ReactAgentRunner implements AgentRunner {
     public AiOpsResult executeOrchestration(String taskPrompt) {
         log.info("开始执行 AI Ops 多 Agent 协作流程");
 
-        DashScopeChatModel chatModel = buildChatModel(0.3, 8000, 0.9);
         ToolCallback[] toolCallbacks = getToolCallbacks();
 
-        ReactAgent plannerAgent = buildPlannerAgent(chatModel, toolCallbacks);
-        ReactAgent executorAgent = buildExecutorAgent(chatModel, toolCallbacks);
+        // 各 Agent 使用独立模型，不再共用一个 chatModel
+        ReactAgent plannerAgent = buildPlannerAgent(toolCallbacks);
+        ReactAgent executorAgent = buildExecutorAgent(toolCallbacks);
 
+        DashScopeChatModel supervisorModel = buildChatModel(modelProperties.getAiops().getSupervisor());
         SupervisorAgent supervisorAgent = SupervisorAgent.builder()
                 .name("ai_ops_supervisor")
                 .description("负责调度 Planner 与 Executor 的多 Agent 控制器")
-                .model(chatModel)
+                .model(supervisorModel)
                 .systemPrompt(buildSupervisorSystemPrompt())
                 .subAgents(List.of(plannerAgent, executorAgent))
                 .build();
@@ -258,7 +263,7 @@ public class ReactAgentRunner implements AgentRunner {
      * Migrated from ChatService.createReactAgent().
      */
     private ReactAgent buildReactAgent(String systemPrompt) {
-        DashScopeChatModel chatModel = buildChatModel(0.7, 2000, 0.9);
+        DashScopeChatModel chatModel = buildChatModel(modelProperties.getChat());
         return ReactAgent.builder()
                 .name("intelligent_assistant")
                 .model(chatModel)
@@ -272,11 +277,12 @@ public class ReactAgentRunner implements AgentRunner {
      * Build the Planner Agent for AIOps orchestration.
      * Migrated from AiOpsService.buildPlannerAgent().
      */
-    private ReactAgent buildPlannerAgent(DashScopeChatModel chatModel, ToolCallback[] toolCallbacks) {
+    private ReactAgent buildPlannerAgent(ToolCallback[] toolCallbacks) {
+        DashScopeChatModel plannerModel = buildChatModel(modelProperties.getAiops().getPlanner());
         return ReactAgent.builder()
                 .name("planner_agent")
                 .description("负责拆解告警、规划与再规划步骤")
-                .model(chatModel)
+                .model(plannerModel)
                 .systemPrompt(buildPlannerPrompt())
                 .methodTools(buildAIOpsMethodToolsArray())
                 .tools(toolCallbacks)
@@ -288,11 +294,12 @@ public class ReactAgentRunner implements AgentRunner {
      * Build the Executor Agent for AIOps orchestration.
      * Migrated from AiOpsService.buildExecutorAgent().
      */
-    private ReactAgent buildExecutorAgent(DashScopeChatModel chatModel, ToolCallback[] toolCallbacks) {
+    private ReactAgent buildExecutorAgent(ToolCallback[] toolCallbacks) {
+        DashScopeChatModel executorModel = buildChatModel(modelProperties.getAiops().getExecutor());
         return ReactAgent.builder()
                 .name("executor_agent")
                 .description("负责执行 Planner 的首个步骤并及时反馈")
-                .model(chatModel)
+                .model(executorModel)
                 .systemPrompt(buildExecutorPrompt())
                 .methodTools(buildAIOpsMethodToolsArray())
                 .tools(toolCallbacks)
@@ -351,20 +358,26 @@ public class ReactAgentRunner implements AgentRunner {
     // ========================================================================
 
     /**
-     * Build a DashScopeChatModel with the given parameters.
-     * Migrated from ChatService.createChatModel().
+     * Build a DashScopeChatModel from a {@link ModelProperties.ModelConfig}.
      */
-    private DashScopeChatModel buildChatModel(double temperature, int maxToken, double topP) {
+    private DashScopeChatModel buildChatModel(ModelProperties.ModelConfig config) {
         DashScopeApi api = DashScopeApi.builder().apiKey(dashScopeApiKey).build();
         return DashScopeChatModel.builder()
                 .dashScopeApi(api)
                 .defaultOptions(DashScopeChatOptions.builder()
-                        .withModel(DashScopeChatModel.DEFAULT_MODEL_NAME)
-                        .withTemperature(temperature)
-                        .withMaxToken(maxToken)
-                        .withTopP(topP)
+                        .withModel(config.getName())
+                        .withTemperature(config.getTemperature())
+                        .withMaxToken(config.getMaxToken())
+                        .withTopP(config.getTopP())
                         .build())
                 .build();
+    }
+
+    /**
+     * Build a DashScopeChatModel using the default chat configuration.
+     */
+    private DashScopeChatModel buildChatModel() {
+        return buildChatModel(modelProperties.getChat());
     }
 
     // ========================================================================
@@ -454,7 +467,7 @@ public class ReactAgentRunner implements AgentRunner {
                     """, taskPrompt);
 
             String report = llmProvider.chat("你是一个企业级 SRE。", forcePrompt,
-                    LlmProvider.ChatOptions.aiOps(DashScopeChatModel.DEFAULT_MODEL_NAME));
+                    LlmProvider.ChatOptions.aiOps(modelProperties.getAiops().getPlanner().getName()));
             log.info("兜底报告生成成功，长度: {}", report != null ? report.length() : 0);
             return AiOpsResult.timeoutFallback(report);
         } catch (Exception e) {
