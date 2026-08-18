@@ -21,6 +21,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
@@ -166,8 +167,10 @@ public class VectorIndexService {
         String content = parser.parse(path);
         logger.info("读取文件: {}, 内容长度: {} 字符", path, content.length());
 
-        // 2. 删除该文件的旧数据（如果存在）
-        deleteExistingData(path.toString());
+        // 2. 归一化源路径，读取现有版本号（用于记账），随后删除该文件的旧数据（如果存在）
+        String normalizedSource = normalizeSource(path.toString());
+        int version = readExistingVersion(normalizedSource) + 1;
+        deleteBySource(normalizedSource);
 
         // 3. 文档分片（通过策略工厂选择策略）
         DocumentChunkStrategy strategy = chunkStrategyFactory.getStrategy(extension);
@@ -186,8 +189,8 @@ public class VectorIndexService {
                 // 检测零向量（embedding 断路器降级标记）
                 boolean needsReindex = vector.stream().allMatch(v -> v == 0.0f);
 
-                // 构建元数据（包含文件信息）
-                Map<String, Object> metadata = buildMetadata(path.toString(), chunk, chunks.size());
+                // 构建元数据（包含文件信息与版本记账）
+                Map<String, Object> metadata = buildMetadata(path.toString(), chunk, chunks.size(), version);
 
                 // 标记需要重新索引（embedding 降级时使用零向量）
                 if (needsReindex) {
@@ -225,7 +228,7 @@ public class VectorIndexService {
             io.milvus.param.dml.QueryParam queryParam = io.milvus.param.dml.QueryParam.newBuilder()
                     .withCollectionName(org.example.constant.MilvusConstants.MILVUS_COLLECTION_NAME)
                     .withExpr("metadata[\"needsReindex\"] == true")
-                    .withOutFields(java.util.Arrays.asList("id", "content", "vector"))
+                    .withOutFields(java.util.Arrays.asList("id", "content", "vector", "metadata"))
                     .build();
 
             io.milvus.param.R<io.milvus.grpc.QueryResults> queryResponse = milvusClient.query(queryParam);
@@ -290,6 +293,9 @@ public class VectorIndexService {
                     java.util.List<io.milvus.param.dml.UpsertParam.Field> fields = new java.util.ArrayList<>();
                     fields.add(new io.milvus.param.dml.UpsertParam.Field("id",
                             java.util.Collections.singletonList(id)));
+                    fields.add(new io.milvus.param.dml.UpsertParam.Field(
+                            org.example.constant.MilvusConstants.TENANT_ID_FIELD,
+                            java.util.Collections.singletonList(org.example.constant.MilvusConstants.DEFAULT_TENANT_ID)));
                     fields.add(new io.milvus.param.dml.UpsertParam.Field("content",
                             java.util.Collections.singletonList(content)));
                     fields.add(new io.milvus.param.dml.UpsertParam.Field("vector",
@@ -349,19 +355,34 @@ public class VectorIndexService {
     }
 
     /**
-     * 删除文件的旧数据（根据 metadata._source）
+     * 删除文档结果
      */
-    private void deleteExistingData(String filePath) {
+    public static class DeleteResult {
+        public String filename;
+        public boolean fileDeleted;
+        public long deletedChunks;
+
+        public java.util.Map<String, Object> toMap() {
+            java.util.Map<String, Object> map = new java.util.LinkedHashMap<>();
+            map.put("filename", filename);
+            map.put("fileDeleted", fileDeleted);
+            map.put("deletedChunks", deletedChunks);
+            return map;
+        }
+    }
+
+    /**
+     * 按 _source 删除 Milvus 中的旧数据（物理删除，供覆盖更新与文档删除共用）
+     *
+     * @param normalizedSource 归一化后的源文件路径（正斜杠分隔）
+     * @return 删除的记录数（首次索引或异常时返回 0）
+     */
+    public long deleteBySource(String normalizedSource) {
         try {
-            // 使用统一的路径分隔符（正斜杠）用于Milvus存储，避免表达式解析错误
-            // 将系统路径转换为统一格式
-            Path path = Paths.get(filePath).normalize();
-            String normalizedPath = path.toString().replace(File.separator, "/");
-            
             // 构建删除表达式：metadata["_source"] == "xxx"
-            String expr = String.format("metadata[\"_source\"] == \"%s\"", normalizedPath);
-            
-            logger.info("准备删除旧数据，路径: {}, 表达式: {}", normalizedPath, expr);
+            String expr = String.format("metadata[\"_source\"] == \"%s\"", normalizedSource);
+
+            logger.info("准备删除旧数据，路径: {}, 表达式: {}", normalizedSource, expr);
 
             // 确保 collection 已加载（删除操作需要集合已加载）
             R<RpcStatus> loadResponse = milvusClient.loadCollection(
@@ -373,7 +394,7 @@ public class VectorIndexService {
             // 状态码 65535 表示集合已经加载，这不是错误
             if (loadResponse.getStatus() != 0 && loadResponse.getStatus() != 65535) {
                 logger.warn("加载 collection 失败: {}", loadResponse.getMessage());
-                return;
+                return 0;
             }
 
             DeleteParam deleteParam = DeleteParam.newBuilder()
@@ -385,20 +406,128 @@ public class VectorIndexService {
 
             if (response.getStatus() != 0) {
                 logger.warn("删除旧数据时出现警告: {}", response.getMessage());
-            } else {
-                long deletedCount = response.getData().getDeleteCnt();
-                logger.info("✓ 已删除文件的旧数据: {}, 删除记录数: {}", normalizedPath, deletedCount);
+                return 0;
             }
+
+            long deletedCount = response.getData().getDeleteCnt();
+            logger.info("✓ 已删除文件的旧数据: {}, 删除记录数: {}", normalizedSource, deletedCount);
+            return deletedCount;
 
         } catch (Exception e) {
             logger.warn("删除旧数据失败（可能是首次索引）: {}", e.getMessage());
+            return 0;
         }
     }
 
     /**
-     * 构建元数据（包含文件信息）
+     * 删除指定文档及其在 Milvus 中的分片（数据生命周期"删"这一环）
+     * <p>
+     * 仅取文件名的 basename，防止路径穿越；删除 uploads 目录下的源文件与对应的 Milvus 分片。
+     *
+     * @param filename 文件名（不含路径）
+     * @return 删除结果
      */
-    private Map<String, Object> buildMetadata(String filePath, DocumentChunk chunk, int totalChunks) {
+    public DeleteResult deleteDocument(String filename) {
+        // 仅保留 basename，防止路径穿越
+        Path safeName = Paths.get(filename).getFileName();
+        String baseName = safeName != null ? safeName.toString() : "";
+        if (baseName.isEmpty()) {
+            throw new IllegalArgumentException("文件名不能为空");
+        }
+
+        DeleteResult result = new DeleteResult();
+        result.filename = baseName;
+
+        // 删除源文件（若存在）
+        Path uploadDir = Paths.get(uploadPath).normalize();
+        Path filePath = uploadDir.resolve(baseName).normalize();
+        if (Files.exists(filePath)) {
+            try {
+                Files.delete(filePath);
+                result.fileDeleted = true;
+                logger.info("已删除源文件: {}", filePath);
+            } catch (Exception e) {
+                logger.warn("删除源文件失败: {}", filePath, e);
+            }
+        }
+
+        // 删除 Milvus 分片
+        String normalizedSource = normalizeSource(filePath.toString());
+        result.deletedChunks = deleteBySource(normalizedSource);
+
+        return result;
+    }
+
+    /**
+     * 查询指定 _source 现有分片的最大 version（无则返回 0），用于版本记账。
+     */
+    private int readExistingVersion(String normalizedSource) {
+        try {
+            // 确保 collection 已加载（query 需要集合处于 loaded 状态，否则版本记账会退化为 1）
+            R<RpcStatus> loadResponse = milvusClient.loadCollection(
+                LoadCollectionParam.newBuilder()
+                    .withCollectionName(MilvusConstants.MILVUS_COLLECTION_NAME)
+                    .build()
+            );
+            if (loadResponse.getStatus() != 0 && loadResponse.getStatus() != 65535) {
+                logger.warn("加载 collection 失败，版本记账退化为 1: {}", loadResponse.getMessage());
+                return 0;
+            }
+
+            String expr = String.format("metadata[\"_source\"] == \"%s\"", normalizedSource);
+            io.milvus.param.dml.QueryParam queryParam = io.milvus.param.dml.QueryParam.newBuilder()
+                    .withCollectionName(MilvusConstants.MILVUS_COLLECTION_NAME)
+                    .withExpr(expr)
+                    .withOutFields(java.util.List.of("metadata"))
+                    .build();
+
+            io.milvus.param.R<io.milvus.grpc.QueryResults> response = milvusClient.query(queryParam);
+            if (response.getStatus() != 0) {
+                logger.warn("查询现有版本失败，默认从 1 开始: {}", response.getMessage());
+                return 0;
+            }
+
+            io.milvus.response.QueryResultsWrapper wrapper =
+                    new io.milvus.response.QueryResultsWrapper(response.getData());
+            com.google.gson.Gson gson = new com.google.gson.Gson();
+            int maxVersion = 0;
+            for (io.milvus.response.QueryResultsWrapper.RowRecord record : wrapper.getRowRecords()) {
+                Object metaObj = record.get("metadata");
+                if (metaObj == null) {
+                    continue;
+                }
+                try {
+                    @SuppressWarnings("unchecked")
+                    java.util.Map<String, Object> meta = gson.fromJson(
+                            String.valueOf(metaObj), java.util.Map.class);
+                    Object version = meta.get("version");
+                    if (version instanceof Number) {
+                        maxVersion = Math.max(maxVersion, ((Number) version).intValue());
+                    }
+                } catch (Exception e) {
+                    logger.warn("解析 metadata 版本失败: {}", e.getMessage());
+                }
+            }
+            return maxVersion;
+
+        } catch (Exception e) {
+            logger.warn("查询现有版本异常，默认从 1 开始: {}", e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * 将文件路径归一化为统一的正斜杠分隔形式，用于 Milvus 中的 _source 存储与匹配。
+     */
+    private String normalizeSource(String filePath) {
+        Path path = Paths.get(filePath).normalize();
+        return path.toString().replace(File.separator, "/");
+    }
+
+    /**
+     * 构建元数据（包含文件信息与版本记账）
+     */
+    private Map<String, Object> buildMetadata(String filePath, DocumentChunk chunk, int totalChunks, int version) {
         Map<String, Object> metadata = new HashMap<>();
         
         // 标准化路径：使用统一的路径分隔符（正斜杠）用于存储，确保跨平台一致性
@@ -417,7 +546,11 @@ public class VectorIndexService {
         metadata.put("_source", normalizedPath);
         metadata.put("_extension", extension);
         metadata.put("_file_name", fileNameStr);
-        
+
+        // 版本记账（硬删语义下记录"当前线上是第几版、何时灌入"）
+        metadata.put("version", version);
+        metadata.put("uploadedAt", System.currentTimeMillis());
+
         // 分片信息
         metadata.put("chunkIndex", chunk.getChunkIndex());
         metadata.put("totalChunks", totalChunks);
@@ -458,10 +591,14 @@ public class VectorIndexService {
 
             // 构建字段数据
             List<InsertParam.Field> fields = new ArrayList<>();
-            
+
             // ID 字段
             fields.add(new InsertParam.Field("id", Collections.singletonList(id)));
-            
+
+            // 租户字段（Partition Key，多租户预留）
+            fields.add(new InsertParam.Field(MilvusConstants.TENANT_ID_FIELD,
+                    Collections.singletonList(MilvusConstants.DEFAULT_TENANT_ID)));
+
             // content 字段
             fields.add(new InsertParam.Field("content", Collections.singletonList(content)));
             
