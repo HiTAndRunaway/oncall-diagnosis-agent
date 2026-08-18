@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # Maven 依赖（工程在子目录 SuperBizAgent-release-2026-05-17）
+  - package-ecosystem: maven
+    directory: "/SuperBizAgent-release-2026-05-17"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    ignore:
+      # Spring AI Alibaba 仍处于 RC 阶段，跳过 RC 升级噪音（稳定后再放开）
+      - dependency-name: "com.alibaba.cloud.ai:*"
+
+  # GitHub Actions 依赖
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
