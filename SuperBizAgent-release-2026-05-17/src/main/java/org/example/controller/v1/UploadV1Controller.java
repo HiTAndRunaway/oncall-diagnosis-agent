@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -121,6 +122,24 @@ public class UploadV1Controller {
         } catch (IOException e) {
             throw new ServiceUnavailableException("文件存储", e.getMessage());
         }
+    }
+
+    /**
+     * 删除文档端点
+     * 删除 uploads 目录下的源文件及其在 Milvus 中的全部向量分片
+     */
+    @Operation(summary = "删除文档", description = "按文件名删除源文件及其向量索引（数据生命周期清理）")
+    @DeleteMapping("/upload")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> deleteDocument(@RequestParam("filename") String filename) {
+        if (filename == null || filename.isBlank()) {
+            throw new InvalidInputException("文件名不能为空");
+        }
+
+        VectorIndexService.DeleteResult result = vectorIndexService.deleteDocument(filename);
+        logger.info("删除文档完成: filename={}, fileDeleted={}, deletedChunks={}",
+                result.filename, result.fileDeleted, result.deletedChunks);
+
+        return ResponseEntity.ok(ApiResponse.success(result.toMap()));
     }
 
     /**

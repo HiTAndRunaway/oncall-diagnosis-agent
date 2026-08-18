@@ -53,6 +53,21 @@ public class MilvusConstants {
     public static final String BM25_FUNCTION_DESC = "BM25 function for content field";
 
     /**
+     * 租户 ID 字段名（Partition Key，多租户预留，当前恒为 default）
+     */
+    public static final String TENANT_ID_FIELD = "tenant_id";
+
+    /**
+     * 默认租户 ID
+     */
+    public static final String DEFAULT_TENANT_ID = "default";
+
+    /**
+     * 租户 ID 字段最大长度
+     */
+    public static final int TENANT_ID_MAX_LENGTH = 64;
+
+    /**
      * 用户记忆 collection 名称
      */
     public static final String MEMORY_COLLECTION_NAME = "user_memory";

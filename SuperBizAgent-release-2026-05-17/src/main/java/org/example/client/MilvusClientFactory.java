@@ -61,12 +61,21 @@ public class MilvusClientFactory {
             client = connectToMilvus();
             logger.info("成功连接到 Milvus");
 
-            // 2. 检查并创建 biz collection（如果不存在）
-            if (!collectionExists(client, MilvusConstants.MILVUS_COLLECTION_NAME)) {
-                logger.info("collection '{}' 不存在，正在创建...", MilvusConstants.MILVUS_COLLECTION_NAME);
+            // 2. 检查并初始化 biz collection（缺失则创建；schema 不含 tenant_id 则自动重建）
+            boolean needInitBiz = !collectionExists(client, MilvusConstants.MILVUS_COLLECTION_NAME);
+            if (!needInitBiz && !schemaHasTenantId(client)) {
+                logger.warn("collection '{}' 缺少 tenant_id 字段（旧 schema），自动重建...",
+                        MilvusConstants.MILVUS_COLLECTION_NAME);
+                dropCollection(client, MilvusConstants.MILVUS_COLLECTION_NAME);
+                logger.info("已删除旧 collection，准备重建（数据需重新 make upload）");
+                needInitBiz = true;
+            }
+
+            if (needInitBiz) {
+                logger.info("正在创建 collection '{}' ...", MilvusConstants.MILVUS_COLLECTION_NAME);
                 createBizCollection(client);
                 logger.info("成功创建 collection '{}'", MilvusConstants.MILVUS_COLLECTION_NAME);
-                
+
                 // 创建索引
                 createIndexes(client);
                 logger.info("成功创建索引");
@@ -76,9 +85,8 @@ public class MilvusClientFactory {
                 createBm25Function(client);
                 createSparseIndex(client);
                 logger.info("BM25 组件初始化完成");
-
             } else {
-                logger.info("collection '{}' 已存在", MilvusConstants.MILVUS_COLLECTION_NAME);
+                logger.info("collection '{}' 已存在且 schema 正确", MilvusConstants.MILVUS_COLLECTION_NAME);
             }
 
             // 3. 检查并创建 user_memory collection（如果不存在）
@@ -136,6 +144,42 @@ public class MilvusClientFactory {
     }
 
     /**
+     * 检查 biz collection 的 schema 是否已包含 tenant_id 字段
+     * <p>
+     * 用于多租户预留的自动迁移：旧 collection 缺少 tenant_id 时触发重建。
+     * 无法判定（describe 失败）时抛异常而非返回 false，避免误删正常 collection。
+     */
+    private boolean schemaHasTenantId(MilvusServiceClient client) {
+        R<io.milvus.grpc.DescribeCollectionResponse> response = client.describeCollection(
+                DescribeCollectionParam.newBuilder()
+                        .withCollectionName(MilvusConstants.MILVUS_COLLECTION_NAME)
+                        .build());
+
+        if (response.getStatus() != 0) {
+            throw new RuntimeException("检查 collection schema 失败: " + response.getMessage());
+        }
+
+        for (io.milvus.grpc.FieldSchema field : response.getData().getSchema().getFieldsList()) {
+            if (MilvusConstants.TENANT_ID_FIELD.equals(field.getName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 删除 collection（用于 schema 变更时的重建）
+     */
+    private void dropCollection(MilvusServiceClient client, String collectionName) {
+        R<RpcStatus> response = client.dropCollection(DropCollectionParam.newBuilder()
+                .withCollectionName(collectionName)
+                .build());
+        if (response.getStatus() != 0) {
+            throw new RuntimeException("删除 collection 失败: " + response.getMessage());
+        }
+    }
+
+    /**
      * 创建 biz collection
      */
     private void createBizCollection(MilvusServiceClient client) {
@@ -145,6 +189,14 @@ public class MilvusClientFactory {
                 .withDataType(DataType.VarChar)
                 .withMaxLength(MilvusConstants.ID_MAX_LENGTH)
                 .withPrimaryKey(true)
+                .build();
+
+        // 租户 ID 字段（Partition Key，多租户预留）
+        FieldType tenantIdField = FieldType.newBuilder()
+                .withName(MilvusConstants.TENANT_ID_FIELD)
+                .withDataType(DataType.VarChar)
+                .withMaxLength(MilvusConstants.TENANT_ID_MAX_LENGTH)
+                .withPartitionKey(true)
                 .build();
 
         FieldType vectorField = FieldType.newBuilder()
@@ -173,6 +225,7 @@ public class MilvusClientFactory {
         CollectionSchemaParam schema = CollectionSchemaParam.newBuilder()
                 .withEnableDynamicField(false)
                 .addFieldType(idField)
+                .addFieldType(tenantIdField)
                 .addFieldType(vectorField)
                 .addFieldType(contentField)
                 .addFieldType(metadataField)
