@@ -127,7 +127,7 @@
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
-            <version>1.18.30</version>
+            <version>1.18.46</version>
             <scope>provided</scope>
         </dependency>
         
@@ -234,7 +234,7 @@
                         <path>
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
-                            <version>1.18.30</version>
+                            <version>1.18.46</version>
                         </path>
                         <!-- 生成 spring-configuration-metadata.json（@ConfigurationProperties 元数据） -->
                         <path>
