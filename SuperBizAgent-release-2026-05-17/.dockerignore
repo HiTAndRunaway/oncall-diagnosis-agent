@@ -1,0 +1,18 @@
+# 构建上下文排除清单（Dockerfile 构建阶段仅需要 pom.xml 与 src/）
+target/
+.git/
+.gitignore
+.idea/
+*.iml
+
+# 运行时产物 / 本地日志
+server.log
+server.pid
+uploads/
+session/
+
+# 文档与测试用例（不进镜像）
+*.md
+aiops-docs/
+aiops-test-cases/
+docs/
