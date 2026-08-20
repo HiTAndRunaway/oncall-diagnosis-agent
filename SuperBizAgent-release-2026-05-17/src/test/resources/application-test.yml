@@ -14,6 +14,12 @@ dashscope:
   api:
     key: ${DASHSCOPE_API_KEY:test-key}
 
+# 测试环境启用 Agent Skills（classpath 来源，验证 SkillsConfig 装配 + hooks 注入不破坏上下文）
+skills:
+  enabled: true
+  registry: classpath
+  classpath-path: skills
+
 prometheus:
   mock-enabled: true
 

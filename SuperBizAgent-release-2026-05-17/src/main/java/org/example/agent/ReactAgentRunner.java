@@ -6,6 +6,8 @@ import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.agent.flow.agent.SupervisorAgent;
+import com.alibaba.cloud.ai.graph.agent.hook.AgentHook;
+import com.alibaba.cloud.ai.graph.agent.hook.skills.SkillsAgentHook;
 import com.alibaba.cloud.ai.graph.streaming.OutputType;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import org.example.agent.tool.DateTimeTools;
@@ -97,6 +99,11 @@ public class ReactAgentRunner implements AgentRunner {
 
     @Autowired
     private AgenticRagGuard agenticRagGuard;
+
+    // ===== Agent Skills（skills.enabled=true 时由 SkillsConfig 注册，默认不注册） =====
+
+    @Autowired(required = false)
+    private SkillsAgentHook skillsAgentHook;
 
     // ===== Memory tools (only when memory.enabled=true) =====
 
@@ -275,6 +282,7 @@ public class ReactAgentRunner implements AgentRunner {
                 .systemPrompt(systemPrompt)
                 .methodTools(buildMethodToolsArray())
                 .tools(getToolCallbacks())
+                .hooks(buildHooks())
                 .build();
     }
 
@@ -291,6 +299,7 @@ public class ReactAgentRunner implements AgentRunner {
                 .systemPrompt(buildPlannerPrompt())
                 .methodTools(buildAIOpsMethodToolsArray())
                 .tools(toolCallbacks)
+                .hooks(buildHooks())
                 .outputKey("planner_plan")
                 .build();
     }
@@ -308,6 +317,7 @@ public class ReactAgentRunner implements AgentRunner {
                 .systemPrompt(buildExecutorPrompt())
                 .methodTools(buildAIOpsMethodToolsArray())
                 .tools(toolCallbacks)
+                .hooks(buildHooks())
                 .outputKey("executor_feedback")
                 .build();
     }
@@ -315,6 +325,15 @@ public class ReactAgentRunner implements AgentRunner {
     // ========================================================================
     // Private — Tool arrays
     // ========================================================================
+
+    /**
+     * 构建 Agent Hooks 列表（预留 Skills 接线）。
+     * skills.enabled=true 时 SkillsConfig 注册 SkillsAgentHook（注入技能清单 + read_skill 工具），
+     * 否则返回空列表，行为与未引入 Skills 前完全一致。
+     */
+    private List<AgentHook> buildHooks() {
+        return skillsAgentHook != null ? List.of(skillsAgentHook) : List.of();
+    }
 
     /**
      * Build the full method tools array for chat agents.
