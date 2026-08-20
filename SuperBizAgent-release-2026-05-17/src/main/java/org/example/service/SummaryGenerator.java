@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -27,7 +28,12 @@ public class SummaryGenerator {
 
     private static final Logger logger = LoggerFactory.getLogger(SummaryGenerator.class);
 
+    /**
+     * @Lazy 打破与 SessionManager 的循环依赖（SessionManager 也注入本类）：
+     * Boot 默认禁止循环引用，本字段仅在异步 triggerAsync 运行时使用，代理注入安全。
+     */
     @Autowired
+    @Lazy
     private SessionManager sessionManager;
 
     @Autowired

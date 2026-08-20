@@ -61,7 +61,7 @@ public class ReactAgentRunner implements AgentRunner {
     @Autowired
     private LlmProvider llmProvider;
 
-    @Autowired
+    @Autowired(required = false)
     private ToolCallbackProvider tools;
 
     // ===== Core tools (always available) =====
@@ -392,9 +392,10 @@ public class ReactAgentRunner implements AgentRunner {
     /**
      * Retrieve MCP-provided tool callbacks.
      * Migrated from ChatService.getToolCallbacks().
+     * MCP 关闭时（MCP_CLIENT_ENABLED=false）provider 为空，返回空数组保证应用可启动。
      */
     private ToolCallback[] getToolCallbacks() {
-        return tools.getToolCallbacks();
+        return tools != null ? tools.getToolCallbacks() : new ToolCallback[0];
     }
 
     // ========================================================================

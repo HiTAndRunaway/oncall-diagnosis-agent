@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -29,7 +30,12 @@ public class MemoryExtractor {
     @Autowired
     private MemoryManager memoryManager;
 
+    /**
+     * @Lazy 打破与 SessionManager 的循环依赖（SessionManager 也注入本类）：
+     * 本字段仅在异步提取记忆运行时使用，代理注入安全。
+     */
     @Autowired
+    @Lazy
     private SessionManager sessionManager;
 
     @Autowired

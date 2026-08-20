@@ -36,9 +36,11 @@ spring:
     
     # Spring AI MCP 客户端配置
     # 如果使用mock数据，请注释这部分内容
+    # 说明：spring-ai 1.1.2 起 MCP 客户端在上下文初始化时同步连接端点，端点不可达会导致应用启动失败；
+    # 本地开发/模拟环境可设置环境变量 MCP_CLIENT_ENABLED=false 关闭
     mcp:
       client:
-        enabled: true
+        enabled: ${MCP_CLIENT_ENABLED:true}
         name: tencent-mcp-server
         version: 1.0.0
         request-timeout: 60s

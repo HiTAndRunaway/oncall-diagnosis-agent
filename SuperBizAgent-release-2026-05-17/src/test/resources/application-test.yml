@@ -3,6 +3,16 @@ spring:
   ai:
     dashscope:
       api-key: ${DASHSCOPE_API_KEY:test-key}
+    # 测试环境关闭 MCP 客户端：spring-ai 1.1.2 会在上下文初始化时同步连接 SSE 端点，
+    # 测试环境无真实腾讯 MCP 服务，关闭后上下文可独立加载
+    mcp:
+      client:
+        enabled: false
+
+# 自定义 DashScope 配置（VectorEmbeddingService 读取，init 时校验非空且非占位符）
+dashscope:
+  api:
+    key: ${DASHSCOPE_API_KEY:test-key}
 
 prometheus:
   mock-enabled: true

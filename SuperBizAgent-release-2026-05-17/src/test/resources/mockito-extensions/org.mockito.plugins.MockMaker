@@ -1,0 +1,4 @@
+# 使用 subclass mock maker（无需 Java agent 附加）
+# 原因：Mockito 5 默认 inline mock maker 在 JDK 21 + 受限环境下自附加 agent 失败
+# （Could not self-attach to current VM），subclass mock maker 仅通过 ByteBuddy 生成子类，无需 agent。
+mock-maker-subclass

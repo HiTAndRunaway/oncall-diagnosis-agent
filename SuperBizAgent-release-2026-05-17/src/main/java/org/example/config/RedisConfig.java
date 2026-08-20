@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -18,7 +19,13 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 @Configuration
 public class RedisConfig {
 
+    /**
+     * 标注 @Primary：Spring AI MCP（SseWebFluxTransportAutoConfiguration）按类型无限定注入 ObjectMapper，
+     * 与 Spring Boot 默认的 objectMapper 并存时会产生歧义；redisObjectMapper 作为主候选可消解该冲突，
+     * 同时 SessionManager / RedisTemplate 仍按 bean 名 redisObjectMapper 精确注入，不受影响。
+     */
     @Bean
+    @Primary
     public ObjectMapper redisObjectMapper() {
         ObjectMapper mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
