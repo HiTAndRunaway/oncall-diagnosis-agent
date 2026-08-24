@@ -19,16 +19,17 @@
 | **API 版本化** | `/api/v1/*` 全新 V1 接口（SpringDoc OpenAPI 注解），旧路径 `/api/*` 由 legacy 控制器 301 重定向 |
 | **Prompt 管理** | 启动时加载 `prompts/**/*.md` 模板（Mustache 渲染 + YAML frontmatter + 中英双语） |
 | **分层模型配置** | chat / aiops / lightweight / reasoning / rewrite 各场景独立模型与参数 |
+| **liteLLM 大模型网关** | 接入 OpenAI 兼容网关统一模型调用与成本管理，DashScope 保留为 fallback，`litellm.enabled` 一键切换 |
 | **工程化交付** | Dockerfile 多阶段构建 + GitHub Actions CI + GHCR 镜像推送 + Dependabot 依赖更新 |
 | **IDE 极客风格前端** | 深色 IDE 风格界面（Activity Bar + Tabs + Status Bar），3 套主题（VS Code Dark+ / One Dark Pro / SynthWave '84），含登录页 |
 
 ## 技术栈
 
 ```
-Java 17  |  Spring Boot 3.2  |  Spring AI Alibaba 1.1.0.0-RC2  |  DashScope (LLM + Embedding + Rerank)
-Milvus 2.6 (milvus-sdk-java 2.6.10)  |  Redis 7  |  SSE 流式输出 (SseEmitter + WebFlux Flux)
-Spring Security  |  Resilience4j 2.2 (断路器)  |  Bucket4j 8.10 + Caffeine (令牌桶限流)
-PDFBox 3.0.3  |  jmustache 1.16 (Prompt 模板)  |  SpringDoc OpenAPI 2.6  |  Lombok 1.18.30
+Java 17  |  Spring Boot 3.5.15  |  Spring AI 1.1.2  |  Spring AI Alibaba 1.1.2.0  |  DashScope (LLM + Embedding + Rerank)
+Spring AI OpenAI 1.1.2  |  liteLLM 网关（OpenAI 兼容，可选）  |  Milvus 2.6 (milvus-sdk-java 2.6.10)  |  Redis 7
+SSE 流式输出 (SseEmitter + WebFlux Flux)  |  Spring Security  |  Resilience4j 2.3 (断路器)  |  Bucket4j 8.10 + Caffeine (令牌桶限流)
+PDFBox 3.0.3  |  jmustache 1.16 (Prompt 模板)  |  SpringDoc OpenAPI 2.8  |  Lombok 1.18.30
 ```
 
 ## 快速开始
@@ -45,6 +46,31 @@ PDFBox 3.0.3  |  jmustache 1.16 (Prompt 模板)  |  SpringDoc OpenAPI 2.6  |  Lo
 ```bash
 export DASHSCOPE_API_KEY=your-dashscope-api-key
 ```
+
+### 2.1 启用 liteLLM 网关模式（可选）
+
+默认 `litellm.enabled=false`（DashScope 直连）。启用网关模式：
+
+```bash
+# 网关侧环境变量
+export DASHSCOPE_API_KEY=sk-百炼key        # 上游密钥（集中在网关容器）
+export LITELLM_MASTER_KEY=sk-管理密钥       # 网关管理密钥
+
+# 启动 liteLLM 网关（项目目录下执行）
+cd SuperBizAgent-release-2026-05-17
+make litellm-up                            # docker-compose -f litellm.yml up -d
+make litellm-health                        # 健康检查
+
+# 创建虚拟密钥（从返回 JSON 的 "key" 字段取值）
+curl -X POST http://localhost:4000/key/generate \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"models": ["qwen3-max","qwen-turbo","text-embedding-v4","gte-rerank-v2"]}'
+
+# application.yml 开启：litellm.enabled: true（api-key 填虚拟密钥或设 LITELLM_API_KEY）
+```
+
+回滚：`litellm.enabled` 改回 `false` 重启即恢复直连。模型注册表在 `litellm/config.yaml`（仅网关使用）。
 
 ### 3. 启动基础设施
 
@@ -261,8 +287,25 @@ TTL：FACT 永不过期 / PROFILE 90 天 / PREFERENCE 30 天
 框架相关的 Agent 构建与执行被隔离在 `agent/` 层：
 
 - **`AgentRunner`**（接口）→ **`ReactAgentRunner`**（Spring AI Alibaba 实现）：封装 ReactAgent / SupervisorAgent 的同步、流式与多 Agent 编排三种执行模式。
-- **`LlmProvider`**（接口）→ **`DashScopeLlmProvider`**（实现）：封装 DashScopeChatModel 创建与调用，`chat()` 带 `@CircuitBreaker("dashscope-llm")` 熔断与降级。
+- **`LlmProvider`**（接口）→ **`DashScopeLlmProvider`**（直连模式）/ **`LiteLlmProvider`**（网关模式，二选一条件注册）：封装模型创建与调用，`chat()` 带 `@CircuitBreaker` 熔断与降级。
+- **`ChatModelFactory`**：统一构建 ChatModel（`litellm.enabled` 开关决定返回 DashScope 或 OpenAI 兼容模型），收敛聊天 / AIOps / 意图 / 摘要 / 改写各处的模型构建。
 - **`PromptManager`**：统一 Prompt 渲染入口，配合 `prompts/zh/**` 目录模板（chat / aiops / agentic-rag / intent / memory / rewrite / summary / eval）。
+
+### 5. liteLLM 大模型网关（2026-08 新增）
+
+```
+SuperBizAgent (Spring Boot :9900)
+  ├─ ChatModelFactory / LlmProvider（聊天/AIOps/意图/摘要/改写）
+  ├─ VectorEmbeddingService（向量化 /v1/embeddings）
+  └─ VectorSearchService（RAG 重排序 /v1/rerank）
+        │  litellm.enabled=true 时
+        ▼
+liteLLM 网关（独立 Docker 容器 :4000）──▶ DashScope API（唯一上游）
+```
+
+- **双模式**：`litellm.enabled=false`（默认）DashScope 直连；`true` 全部模型调用经 liteLLM 网关转发，成本与日志集中在网关侧。
+- **配置**：`litellm/config.yaml` 模型注册表（`model_name` 与应用模型名严格对齐）、`litellm.yml` 容器编排（Docker Compose + healthcheck）、`application.yml` 的 `litellm.*` 连接配置（地址 / 虚拟密钥 / 开关）。
+- **命令**：`make litellm-up` / `make litellm-down` / `make litellm-health`（弱依赖，不随 `make up` 启动）。
 
 ## 项目结构
 
@@ -274,7 +317,8 @@ SuperBizAgent-release-2026-05-17/
 │   │   ├── AgentRunner.java               # Agent 执行抽象接口
 │   │   ├── ReactAgentRunner.java          # ReactAgent / SupervisorAgent 实现 ⭐
 │   │   ├── LlmProvider.java               # LLM 调用抽象接口
-│   │   ├── DashScopeLlmProvider.java      # DashScope 实现（含断路器熔断）
+│   │   ├── DashScopeLlmProvider.java      # DashScope 实现（litellm.enabled=false 时注册）
+│   │   ├── LiteLlmProvider.java           # liteLLM 网关实现（litellm.enabled=true 时注册）🆕
 │   │   ├── tool/                          # Agent 工具集（@Tool 方法工具）
 │   │   │   ├── DateTimeTools.java         # 当前时间（始终真实）
 │   │   │   ├── InternalDocsTools.java     # 内部知识库检索（Milvus 真实搜索）
@@ -359,6 +403,8 @@ SuperBizAgent-release-2026-05-17/
 │   │   └── RateLimitInterceptor.java      # Bucket4j 令牌桶限流
 │   ├── config/                            # 配置类
 │   │   ├── SecurityConfig.java            # Spring Security（API Key 认证）
+│   │   ├── ChatModelFactory.java          # 模型统一构建（网关/直连开关收敛点）🆕
+│   │   ├── LiteLlmProperties.java         # liteLLM 网关配置属性 🆕
 │   │   ├── RateLimitConfig.java           # 限流端点规则
 │   │   ├── RedisConfig.java / SessionRedisProperties.java
 │   │   ├── MilvusConfig.java / MilvusProperties.java
@@ -399,6 +445,9 @@ SuperBizAgent-release-2026-05-17/
 ├── aiops-docs/                            # 运维知识库（RAG 文档源，5 篇）
 ├── docs/                                  # api-sse-protocol.md / feature-flags.md / 设计文档
 ├── vector-database.yml                    # Docker Compose（Milvus + etcd + MinIO + Attu）
+├── litellm/                               # liteLLM 网关配置（config.yaml 模型注册表）🆕
+├── litellm.yml                            # liteLLM Docker Compose 编排 🆕
+├── .env.example                           # 环境变量模板 🆕
 ├── Dockerfile                             # 多阶段构建（maven → JRE）
 ├── Makefile                               # 一键初始化脚本
 └── pom.xml
@@ -520,11 +569,18 @@ resilience4j:
   circuitbreaker:
     instances:
       dashscope-llm: {}         # LLM 调用熔断（30s 恢复）
+      litellm-llm: {}           # liteLLM 网关调用熔断 🆕
       dashscope-embedding: {}
       milvus-search: {}
   ratelimiter:
     instances:
       file-upload: { limit-for-period: 10, limit-refresh-period: 1m }
+
+# liteLLM 大模型网关（可选）🆕
+litellm:
+  enabled: false                     # true=走网关，false=DashScope 直连
+  base-url: http://localhost:4000
+  api-key: ${LITELLM_API_KEY:sk-litellm-change-me}
 
 # 分层模型
 ai:
@@ -559,6 +615,7 @@ springdoc:
 | `intent.router.enabled` | true | 意图识别路由 |
 | `session.redis.summary.enabled` | true | 对话摘要生成 |
 | `aiops.eval.enabled` | true | LLM-as-Judge 质量评估 |
+| `litellm.enabled` | false | liteLLM 大模型网关（true=经网关，false=DashScope 直连） |
 
 > 完整说明见 `docs/feature-flags.md`；启动时 `FeatureFlagStartupChecker` 会校验开关依赖（如 memory 需要 Redis）。
 
