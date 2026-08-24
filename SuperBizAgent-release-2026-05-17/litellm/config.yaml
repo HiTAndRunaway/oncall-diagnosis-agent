@@ -1,0 +1,44 @@
+# ============================================================
+# liteLLM 网关配置 — SuperBizAgent
+# 启动: docker run 或 docker-compose（见 litellm.yml）
+# 上游: 阿里云 DashScope（唯一真实 provider）
+# 关键设计: model_name 与项目 application.yml 中的模型名完全一致 → 应用侧零改动
+# ============================================================
+
+model_list:
+  - model_name: qwen3-max
+    litellm_params:
+      model: dashscope/qwen3-max
+      api_key: os.environ/DASHSCOPE_API_KEY
+  - model_name: qwen-turbo
+    litellm_params:
+      model: dashscope/qwen-turbo
+      api_key: os.environ/DASHSCOPE_API_KEY
+  - model_name: text-embedding-v4
+    litellm_params:
+      model: dashscope/text-embedding-v4
+      api_key: os.environ/DASHSCOPE_API_KEY
+  - model_name: gte-rerank-v2
+    litellm_params:
+      model: dashscope/gte-rerank-v2
+      api_key: os.environ/DASHSCOPE_API_KEY
+
+litellm_settings:
+  # 透传失败时丢弃不支持的参数，避免参数兼容性报错
+  drop_params: true
+
+router_settings:
+  # 网关层负责重试；应用层 resilience4j 熔断保留（避免双层重试叠加放大延迟）
+  retry_policy:
+    retries: 2
+    timeout: 600
+    on_exceptions:
+      - Timeout
+      - APIError
+
+general_settings:
+  # 管理密钥（写入环境变量 LITELLM_MASTER_KEY 或改为实际值）
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # 虚拟密钥：按业务域隔离，成本归属清晰
+  # 可通过 liteLLM UI/API 创建：chat / aiops / embedding / lightweight
+  # database_url: os.environ/DATABASE_URL   # 可选：挂 Postgres 持久化 spend logs / 预算（MVP 不启用）

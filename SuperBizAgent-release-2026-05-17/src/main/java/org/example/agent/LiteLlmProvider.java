@@ -18,25 +18,24 @@ import reactor.core.publisher.Flux;
 import java.util.List;
 
 /**
- * DashScope implementation of {@link LlmProvider}.
- * Encapsulates DashScopeChatModel creation and invocation.
+ * liteLLM 网关实现（OpenAI 兼容）的 {@link LlmProvider}。
  * <p>
- * 仅在 {@code litellm.enabled=false}（默认）时注册，与 {@link LiteLlmProvider} 二选一。
- * 模型构建统一收敛到 {@link ChatModelFactory}。
+ * 仅在 {@code litellm.enabled=true} 时注册（与 {@code DashScopeLlmProvider} 二选一），
+ * 通过 {@link ChatModelFactory} 构建指向 liteLLM 的 OpenAiChatModel。
  */
 @Component
-@ConditionalOnProperty(name = "litellm.enabled", havingValue = "false", matchIfMissing = true)
-public class DashScopeLlmProvider implements LlmProvider {
+@ConditionalOnProperty(name = "litellm.enabled", havingValue = "true")
+public class LiteLlmProvider implements LlmProvider {
 
-    private static final Logger log = LoggerFactory.getLogger(DashScopeLlmProvider.class);
+    private static final Logger log = LoggerFactory.getLogger(LiteLlmProvider.class);
 
     @Autowired
     private ChatModelFactory chatModelFactory;
 
     @Override
-    @CircuitBreaker(name = "dashscope-llm", fallbackMethod = "chatFallback")
+    @CircuitBreaker(name = "litellm-llm", fallbackMethod = "chatFallback")
     public String chat(String systemMessage, String userMessage, ChatOptions options) {
-        ChatModel model = buildModel(options);
+        ChatModel model = chatModelFactory.create(options.model(), options.temperature(), options.maxToken(), options.topP());
         Prompt prompt = new Prompt(
                 List.of(
                         new SystemMessage(systemMessage),
@@ -49,7 +48,7 @@ public class DashScopeLlmProvider implements LlmProvider {
 
     @Override
     public Flux<String> chatStream(String systemMessage, String userMessage, ChatOptions options) {
-        ChatModel model = buildModel(options);
+        ChatModel model = chatModelFactory.create(options.model(), options.temperature(), options.maxToken(), options.topP());
         Prompt prompt = new Prompt(
                 List.of(
                         new SystemMessage(systemMessage),
@@ -67,13 +66,6 @@ public class DashScopeLlmProvider implements LlmProvider {
     @SuppressWarnings("unused")
     private String chatFallback(String systemMessage, String userMessage, ChatOptions options, Throwable t) {
         log.warn("[CircuitBreaker] LLM 服务降级 - error: {}", t.getMessage());
-        throw new LlmServiceException("DashScope", "AI 服务暂时不可用，系统已自动熔断保护，预计 30 秒后恢复");
-    }
-
-    /**
-     * Build a ChatModel from the given options（经 ChatModelFactory，与网关模式共用构建逻辑）。
-     */
-    private ChatModel buildModel(ChatOptions options) {
-        return chatModelFactory.create(options.model(), options.temperature(), options.maxToken(), options.topP());
+        throw new LlmServiceException("LiteLLM", "AI 服务暂时不可用，系统已自动熔断保护，预计 30 秒后恢复");
     }
 }

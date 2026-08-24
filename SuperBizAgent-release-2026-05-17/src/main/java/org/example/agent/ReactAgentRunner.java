@@ -1,8 +1,5 @@
 package org.example.agent;
 
-import com.alibaba.cloud.ai.dashscope.api.DashScopeApi;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.agent.flow.agent.SupervisorAgent;
@@ -21,6 +18,7 @@ import org.example.agent.tool.QueryMetricsTools;
 import org.example.agent.tool.RecallMemoryTool;
 import org.example.agent.tool.RefineQueryTool;
 import org.example.agent.tool.SearchKnowledgeBaseTool;
+import org.example.config.ChatModelFactory;
 import org.example.config.ModelProperties;
 import org.example.dto.AgentEvent;
 import org.example.dto.AiOpsResult;
@@ -30,6 +28,7 @@ import org.example.service.PromptManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -121,8 +120,8 @@ public class ReactAgentRunner implements AgentRunner {
     @Autowired
     private PromptManager promptManager;
 
-    @Value("${spring.ai.dashscope.api-key}")
-    private String dashScopeApiKey;
+    @Autowired
+    private ChatModelFactory chatModelFactory;
 
     @Value("${aiops.total-timeout-seconds:300}")
     private int totalTimeoutSeconds;
@@ -215,7 +214,7 @@ public class ReactAgentRunner implements AgentRunner {
         ReactAgent plannerAgent = buildPlannerAgent(toolCallbacks);
         ReactAgent executorAgent = buildExecutorAgent(toolCallbacks);
 
-        DashScopeChatModel supervisorModel = buildChatModel(modelProperties.getAiops().getSupervisor());
+        ChatModel supervisorModel = buildChatModel(modelProperties.getAiops().getSupervisor());
         SupervisorAgent supervisorAgent = SupervisorAgent.builder()
                 .name("ai_ops_supervisor")
                 .description("负责调度 Planner 与 Executor 的多 Agent 控制器")
@@ -275,7 +274,7 @@ public class ReactAgentRunner implements AgentRunner {
      * Migrated from ChatService.createReactAgent().
      */
     private ReactAgent buildReactAgent(String systemPrompt) {
-        DashScopeChatModel chatModel = buildChatModel(modelProperties.getChat());
+        ChatModel chatModel = buildChatModel(modelProperties.getChat());
         return ReactAgent.builder()
                 .name("intelligent_assistant")
                 .model(chatModel)
@@ -291,7 +290,7 @@ public class ReactAgentRunner implements AgentRunner {
      * Migrated from AiOpsService.buildPlannerAgent().
      */
     private ReactAgent buildPlannerAgent(ToolCallback[] toolCallbacks) {
-        DashScopeChatModel plannerModel = buildChatModel(modelProperties.getAiops().getPlanner());
+        ChatModel plannerModel = buildChatModel(modelProperties.getAiops().getPlanner());
         return ReactAgent.builder()
                 .name("planner_agent")
                 .description("负责拆解告警、规划与再规划步骤")
@@ -309,7 +308,7 @@ public class ReactAgentRunner implements AgentRunner {
      * Migrated from AiOpsService.buildExecutorAgent().
      */
     private ReactAgent buildExecutorAgent(ToolCallback[] toolCallbacks) {
-        DashScopeChatModel executorModel = buildChatModel(modelProperties.getAiops().getExecutor());
+        ChatModel executorModel = buildChatModel(modelProperties.getAiops().getExecutor());
         return ReactAgent.builder()
                 .name("executor_agent")
                 .description("负责执行 Planner 的首个步骤并及时反馈")
@@ -382,25 +381,19 @@ public class ReactAgentRunner implements AgentRunner {
     // ========================================================================
 
     /**
-     * Build a DashScopeChatModel from a {@link ModelProperties.ModelConfig}.
+     * Build a ChatModel from a {@link ModelProperties.ModelConfig}.
+     * <p>
+     * 通过 {@link ChatModelFactory} 构建：litellm.enabled=true 时返回指向 liteLLM 的 OpenAI 兼容模型，
+     * 否则返回 DashScopeChatModel（现状行为）。
      */
-    private DashScopeChatModel buildChatModel(ModelProperties.ModelConfig config) {
-        DashScopeApi api = DashScopeApi.builder().apiKey(dashScopeApiKey).build();
-        return DashScopeChatModel.builder()
-                .dashScopeApi(api)
-                .defaultOptions(DashScopeChatOptions.builder()
-                        .withModel(config.getName())
-                        .withTemperature(config.getTemperature())
-                        .withMaxToken(config.getMaxToken())
-                        .withTopP(config.getTopP())
-                        .build())
-                .build();
+    private ChatModel buildChatModel(ModelProperties.ModelConfig config) {
+        return chatModelFactory.create(config);
     }
 
     /**
-     * Build a DashScopeChatModel using the default chat configuration.
+     * Build a ChatModel using the default chat configuration.
      */
-    private DashScopeChatModel buildChatModel() {
+    private ChatModel buildChatModel() {
         return buildChatModel(modelProperties.getChat());
     }
 

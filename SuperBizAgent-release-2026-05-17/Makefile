@@ -15,7 +15,7 @@ YELLOW = \033[0;33m
 RED = \033[0;31m
 NC = \033[0m # No Color
 
-.PHONY: help init start stop restart check upload clean up down status wait
+.PHONY: help init start stop restart check upload clean up down status wait litellm-up litellm-down litellm-health
 
 # 默认目标：显示帮助信息
 help:
@@ -266,3 +266,28 @@ status:
 		echo "$(YELLOW)⚠️  没有找到 Milvus 相关容器$(NC)"; \
 		echo "$(YELLOW)提示: 运行 'make docker-up' 启动容器$(NC)"; \
 	fi
+
+# 启动 liteLLM 网关（弱依赖：应用启动不依赖网关存活，调用时才生效）
+litellm-up:
+	@echo "$(YELLOW)🚀 启动 liteLLM 网关...$(NC)"
+	@if [ ! -f "litellm.yml" ]; then \
+		echo "$(RED)❌ litellm.yml 不存在$(NC)"; \
+		exit 1; \
+	fi
+	@docker-compose -f litellm.yml up -d
+	@echo "$(GREEN)✅ liteLLM 网关已启动: http://localhost:4000$(NC)"
+
+# 停止 liteLLM 网关
+litellm-down:
+	@echo "$(YELLOW)🛑 停止 liteLLM 网关...$(NC)"
+	@if [ -f "litellm.yml" ]; then \
+		docker-compose -f litellm.yml down; \
+		echo "$(GREEN)✅ liteLLM 网关已停止$(NC)"; \
+	else \
+		echo "$(YELLOW)⚠️  litellm.yml 不存在$(NC)"; \
+	fi
+
+# liteLLM 网关健康检查
+litellm-health:
+	@echo "$(YELLOW)🔍 liteLLM 网关健康检查...$(NC)"
+	@curl -s http://localhost:4000/health/liveliness | head -c 200; echo ""

@@ -1,12 +1,11 @@
 package org.example.agent.eval;
 
-import com.alibaba.cloud.ai.dashscope.api.DashScopeApi;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.config.ChatModelFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,8 +29,8 @@ public class AIOpsEvaluator {
     @Autowired(required = false)
     private TestCaseLoader testCaseLoader;
 
-    @Value("${spring.ai.dashscope.api-key}")
-    private String dashScopeApiKey;
+    @Autowired
+    private ChatModelFactory chatModelFactory;
 
     @Value("${aiops.eval.enabled:true}")
     private boolean enabled;
@@ -135,22 +134,10 @@ public class AIOpsEvaluator {
     }
 
     /**
-     * 调用 qwen-turbo 执行评估
+     * 调用评估 LLM 执行评估（经 ChatModelFactory 构建，支持 liteLLM 网关切换）
      */
     private String callJudgeLLM(String judgePrompt) {
-        DashScopeApi api = DashScopeApi.builder()
-                .apiKey(dashScopeApiKey)
-                .build();
-
-        DashScopeChatModel chatModel = DashScopeChatModel.builder()
-                .dashScopeApi(api)
-                .defaultOptions(DashScopeChatOptions.builder()
-                        .withModel(model)
-                        .withTemperature(0.1)
-                        .withMaxToken(500)
-                        .withTopP(0.9)
-                        .build())
-                .build();
+        ChatModel chatModel = chatModelFactory.create(model, 0.1, 500, 0.9);
 
         Prompt prompt = new Prompt(new UserMessage(judgePrompt));
         ChatResponse response = chatModel.call(prompt);

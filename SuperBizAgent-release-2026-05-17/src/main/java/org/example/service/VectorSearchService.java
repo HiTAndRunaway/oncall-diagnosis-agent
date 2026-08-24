@@ -10,6 +10,7 @@ import io.milvus.param.dml.SearchParam;
 import io.milvus.response.SearchResultsWrapper;
 import lombok.Getter;
 import lombok.Setter;
+import org.example.config.LiteLlmProperties;
 import org.example.config.MilvusProperties;
 import org.example.constant.MilvusConstants;
 import org.slf4j.Logger;
@@ -61,6 +62,9 @@ public class VectorSearchService {
 
     @Autowired
     private MilvusProperties milvusProperties;
+
+    @Autowired
+    private LiteLlmProperties liteLlmProperties;
 
     // ===== 重排序配置 =====
     @Value("${rag.rerank.enabled:true}")
@@ -572,9 +576,14 @@ public class VectorSearchService {
     }
 
     /**
-     * 调用 DashScope Rerank REST API
+     * 调用 Rerank REST API
+     * litellm.enabled=true 时走 liteLLM OpenAI 兼容 /v1/rerank，否则走 DashScope 原生 Rerank API
      */
     private RerankResponse callRerankApi(String query, List<String> documents) {
+        if (liteLlmProperties.isEnabled()) {
+            return callRerankApiGateway(query, documents);
+        }
+
         // 构建请求体
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("model", rerankModel);
@@ -606,6 +615,95 @@ public class VectorSearchService {
         }
 
         return response.getBody();
+    }
+
+    /**
+     * 通过 liteLLM 网关（OpenAI 兼容 /v1/rerank）调用重排序
+     * <p>
+     * 响应兼容两种形态：liteLLM/OpenAI 兼容的顶层 {@code results[]}，
+     * 以及部分实现透传的 DashScope 风格 {@code output.results[]}。
+     */
+    @SuppressWarnings("unchecked")
+    private RerankResponse callRerankApiGateway(String query, List<String> documents) {
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("model", rerankModel);
+        requestBody.put("query", query);
+        requestBody.put("documents", documents);
+        requestBody.put("top_n", rerankTopK);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(liteLlmProperties.getApiKey());
+
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
+        String url = liteLlmProperties.getBaseUrl() + "/v1/rerank";
+
+        logger.debug("调用 liteLLM Rerank 网关: {}, 文档数: {}", url, documents.size());
+
+        ResponseEntity<Map> response = restTemplate.postForEntity(url, entity, Map.class);
+
+        if (response.getBody() == null) {
+            throw new RuntimeException("liteLLM Rerank 网关返回空响应");
+        }
+
+        List<Map<String, Object>> results = (List<Map<String, Object>>) response.getBody().get("results");
+        if (results == null) {
+            Map<String, Object> output = (Map<String, Object>) response.getBody().get("output");
+            if (output != null) {
+                results = (List<Map<String, Object>>) output.get("results");
+            }
+        }
+        if (results == null || results.isEmpty()) {
+            throw new RuntimeException("liteLLM Rerank 网关返回无 results");
+        }
+
+        RerankResponse rerankResponse = new RerankResponse();
+        RerankOutput rerankOutput = new RerankOutput();
+        List<RerankResultItem> items = new ArrayList<>();
+        for (Map<String, Object> r : results) {
+            RerankResultItem item = new RerankResultItem();
+            // 解析失败显式抛异常，由上层 rerank() 降级为原始排序，避免产出脏结果（如全部 index 归 0）
+            item.setIndex(parseIntField(r.get("index")));
+            item.setRelevanceScore(parseDoubleField(r.get("relevance_score")));
+            items.add(item);
+        }
+        rerankOutput.setResults(items);
+        rerankResponse.setOutput(rerankOutput);
+        return rerankResponse;
+    }
+
+    /**
+     * 解析 rerank 响应中的 index 字段（支持 Number 与数字字符串）。
+     */
+    private static int parseIntField(Object value) {
+        if (value instanceof Number n) {
+            return n.intValue();
+        }
+        if (value instanceof String s) {
+            try {
+                return Integer.parseInt(s.trim());
+            } catch (NumberFormatException ignored) {
+                // fall through to error below
+            }
+        }
+        throw new IllegalArgumentException("liteLLM Rerank 网关返回的 index 字段无法解析: " + value);
+    }
+
+    /**
+     * 解析 rerank 响应中的 relevance_score 字段（支持 Number 与数字字符串）。
+     */
+    private static double parseDoubleField(Object value) {
+        if (value instanceof Number n) {
+            return n.doubleValue();
+        }
+        if (value instanceof String s) {
+            try {
+                return Double.parseDouble(s.trim());
+            } catch (NumberFormatException ignored) {
+                // fall through to error below
+            }
+        }
+        throw new IllegalArgumentException("liteLLM Rerank 网关返回的 relevance_score 字段无法解析: " + value);
     }
 
     // ===== Rerank API 响应 DTO =====

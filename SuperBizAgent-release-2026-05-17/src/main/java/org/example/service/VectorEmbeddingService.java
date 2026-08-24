@@ -8,20 +8,32 @@ import com.alibaba.dashscope.embeddings.TextEmbeddingResultItem;
 import com.alibaba.dashscope.exception.NoApiKeyException;
 import com.alibaba.dashscope.utils.Constants;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import org.example.config.LiteLlmProperties;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
 import jakarta.annotation.PostConstruct;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 向量嵌入服务
- * 使用阿里云 DashScope Text Embedding API
+ * <p>
+ * 默认使用阿里云 DashScope Text Embedding API；
+ * {@code litellm.enabled=true} 时改走 liteLLM OpenAI 兼容 {@code /v1/embeddings} 网关。
  */
 @Service
 public class VectorEmbeddingService {
@@ -34,10 +46,28 @@ public class VectorEmbeddingService {
     @Value("${dashscope.embedding.model}")
     private String model;
 
+    @Autowired
+    private LiteLlmProperties liteLlmProperties;
+
     private TextEmbedding textEmbedding;
+
+    private final RestTemplate restTemplate = createRestTemplate();
+
+    private static RestTemplate createRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(10000);
+        factory.setReadTimeout(60000);
+        return new RestTemplate(factory);
+    }
 
     @PostConstruct
     public void init() {
+        // liteLLM 网关模式下跳过 DashScope SDK 初始化（上游密钥集中在网关侧）
+        if (liteLlmProperties.isEnabled()) {
+            logger.info("liteLLM 网关模式：Embedding 走网关 {}，跳过 DashScope SDK 初始化", liteLlmProperties.getBaseUrl());
+            return;
+        }
+
         // 验证 API Key
         if (apiKey == null || apiKey.trim().isEmpty() || apiKey.equals("your-api-key-here")) {
             logger.error("API Key 未正确配置！当前值: {}", apiKey);
@@ -69,7 +99,8 @@ public class VectorEmbeddingService {
 
     /**
      * 生成向量嵌入
-     * 调用阿里云 DashScope Text Embedding API
+     * 默认调用阿里云 DashScope Text Embedding API；
+     * litellm.enabled=true 时走 liteLLM OpenAI 兼容 /v1/embeddings
      * 
      * @param content 文本内容
      * @return 向量嵌入（浮点数列表）
@@ -80,6 +111,12 @@ public class VectorEmbeddingService {
             if (content == null || content.trim().isEmpty()) {
                 logger.warn("内容为空，无法生成向量");
                 throw new IllegalArgumentException("内容不能为空");
+            }
+
+            // liteLLM 网关模式
+            if (liteLlmProperties.isEnabled()) {
+                List<List<Float>> embeddings = generateEmbeddingsViaGateway(Collections.singletonList(content));
+                return embeddings.isEmpty() ? Collections.emptyList() : embeddings.get(0);
             }
 
             logger.debug("开始生成向量嵌入, 内容长度: {} 字符", content.length());
@@ -161,6 +198,8 @@ public class VectorEmbeddingService {
 
     /**
      * 批量生成向量嵌入
+     * 默认调用阿里云 DashScope Text Embedding API；
+     * litellm.enabled=true 时走 liteLLM OpenAI 兼容 /v1/embeddings
      * 
      * @param contents 文本内容列表
      * @return 向量嵌入列表
@@ -173,6 +212,11 @@ public class VectorEmbeddingService {
             }
 
             logger.info("开始批量生成向量嵌入, 数量: {}", contents.size());
+
+            // liteLLM 网关模式
+            if (liteLlmProperties.isEnabled()) {
+                return generateEmbeddingsViaGateway(contents);
+            }
             
             // 确保 API Key 已设置
             if (Constants.apiKey == null || Constants.apiKey.isEmpty()) {
@@ -260,5 +304,55 @@ public class VectorEmbeddingService {
         }
 
         return dotProduct / (float) (Math.sqrt(norm1) * Math.sqrt(norm2));
+    }
+
+    /**
+     * 通过 liteLLM 网关（OpenAI 兼容 /v1/embeddings）批量生成向量
+     *
+     * @param texts 文本列表
+     * @return 向量嵌入列表（与输入顺序一致）
+     */
+    @SuppressWarnings("unchecked")
+    private List<List<Float>> generateEmbeddingsViaGateway(List<String> texts) {
+        Map<String, Object> requestBody = new LinkedHashMap<>();
+        requestBody.put("model", model);
+        requestBody.put("input", texts);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(liteLlmProperties.getApiKey());
+
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
+        String url = liteLlmProperties.getBaseUrl() + "/v1/embeddings";
+
+        logger.debug("调用 liteLLM Embedding 网关: {}, 文本数: {}", url, texts.size());
+
+        ResponseEntity<Map> response = restTemplate.postForEntity(url, entity, Map.class);
+        if (response.getBody() == null) {
+            throw new RuntimeException("liteLLM Embedding 网关返回空响应");
+        }
+
+        List<Map<String, Object>> data = (List<Map<String, Object>>) response.getBody().get("data");
+        if (data == null || data.isEmpty()) {
+            throw new RuntimeException("liteLLM Embedding 网关返回空向量列表");
+        }
+
+        List<List<Float>> embeddings = new ArrayList<>(data.size());
+        for (int i = 0; i < data.size(); i++) {
+            Map<String, Object> item = data.get(i);
+            List<Number> numbers = (List<Number>) item.get("embedding");
+            if (numbers == null || numbers.isEmpty()) {
+                throw new RuntimeException("liteLLM Embedding 网关返回的 data[" + i + "] 缺少 embedding 字段");
+            }
+            List<Float> embedding = new ArrayList<>(numbers.size());
+            for (Number n : numbers) {
+                embedding.add(n.floatValue());
+            }
+            embeddings.add(embedding);
+        }
+
+        logger.info("liteLLM 网关批量生成向量完成, 数量: {}, 维度: {}",
+                embeddings.size(), embeddings.isEmpty() ? 0 : embeddings.get(0).size());
+        return embeddings;
     }
 }

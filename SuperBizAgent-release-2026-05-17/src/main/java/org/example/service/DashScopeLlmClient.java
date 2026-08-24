@@ -1,7 +1,9 @@
 package org.example.service;
 
+import org.example.config.LiteLlmProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -16,10 +18,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * DashScope LLM HTTP 客户端（通用）
+ * LLM HTTP 客户端（通用）
  * <p>
- * 封装对 DashScope Text Generation API 的 HTTP 调用，
- * 供 EvaluateSearchResultsTool 和 DecomposeQuestionTool 复用。
+ * 默认封装对 DashScope Text Generation API 的 HTTP 调用，
+ * 供 EvaluateSearchResultsTool / DecomposeQuestionTool / MemoryExtractor 复用。
+ * <p>
+ * {@code litellm.enabled=true} 时改走 liteLLM OpenAI 兼容 {@code /v1/chat/completions} 网关。
  */
 @Component
 public class DashScopeLlmClient {
@@ -33,6 +37,9 @@ public class DashScopeLlmClient {
     @Value("${dashscope.api.key}")
     private String apiKey;
 
+    @Autowired
+    private LiteLlmProperties liteLlmProperties;
+
     private final RestTemplate restTemplate = createRestTemplate();
 
     private static RestTemplate createRestTemplate() {
@@ -43,7 +50,7 @@ public class DashScopeLlmClient {
     }
 
     /**
-     * 调用 DashScope LLM，返回 message.content 文本
+     * 调用 LLM，返回 message.content 文本
      *
      * @param model       模型名称
      * @param prompt      用户提示词
@@ -52,6 +59,12 @@ public class DashScopeLlmClient {
      * @return LLM 返回的文本内容
      */
     public String call(String model, String prompt, double temperature, int maxTokens) {
+        // liteLLM 网关模式
+        if (liteLlmProperties.isEnabled()) {
+            return callGateway(model, List.of(Map.of("role", "user", "content", prompt)),
+                    temperature, maxTokens);
+        }
+
         // 构建请求体
         Map<String, Object> requestBody = new LinkedHashMap<>();
         requestBody.put("model", model);
@@ -103,7 +116,7 @@ public class DashScopeLlmClient {
     }
 
     /**
-     * 调用 DashScope LLM，支持 system prompt + user message
+     * 调用 LLM，支持 system prompt + user message
      *
      * @param model        模型名称
      * @param systemPrompt 系统提示词
@@ -115,6 +128,14 @@ public class DashScopeLlmClient {
     @SuppressWarnings("unchecked")
     public String callWithSystemPrompt(String model, String systemPrompt,
                                         String userMessage, double temperature, int maxTokens) {
+        // liteLLM 网关模式
+        if (liteLlmProperties.isEnabled()) {
+            List<Map<String, String>> messages = new java.util.ArrayList<>();
+            messages.add(Map.of("role", "system", "content", systemPrompt));
+            messages.add(Map.of("role", "user", "content", userMessage));
+            return callGateway(model, messages, temperature, maxTokens);
+        }
+
         Map<String, Object> requestBody = new LinkedHashMap<>();
         requestBody.put("model", model);
 
@@ -154,6 +175,44 @@ public class DashScopeLlmClient {
         Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
         if (message == null) {
             throw new RuntimeException("DashScope API 返回无 message");
+        }
+        return (String) message.get("content");
+    }
+
+    /**
+     * 通过 liteLLM 网关（OpenAI 兼容 /v1/chat/completions）调用 LLM
+     */
+    @SuppressWarnings("unchecked")
+    private String callGateway(String model, List<Map<String, String>> messages,
+                               double temperature, int maxTokens) {
+        Map<String, Object> requestBody = new LinkedHashMap<>();
+        requestBody.put("model", model);
+        requestBody.put("messages", messages);
+        requestBody.put("temperature", temperature);
+        requestBody.put("max_tokens", maxTokens);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(liteLlmProperties.getApiKey());
+
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
+        String url = liteLlmProperties.getBaseUrl() + "/v1/chat/completions";
+
+        logger.debug("调用 liteLLM 聊天网关: {}, model: {}", url, model);
+
+        ResponseEntity<Map> response = restTemplate.postForEntity(url, entity, Map.class);
+
+        if (response.getBody() == null) {
+            throw new RuntimeException("liteLLM 网关返回空响应");
+        }
+
+        List<Map<String, Object>> choices = (List<Map<String, Object>>) response.getBody().get("choices");
+        if (choices == null || choices.isEmpty()) {
+            throw new RuntimeException("liteLLM 网关返回无 choices");
+        }
+        Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
+        if (message == null) {
+            throw new RuntimeException("liteLLM 网关返回无 message");
         }
         return (String) message.get("content");
     }

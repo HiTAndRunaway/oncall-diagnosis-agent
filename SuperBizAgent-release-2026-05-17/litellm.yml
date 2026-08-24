@@ -1,0 +1,22 @@
+# liteLLM 大模型网关 — Docker Compose 服务定义
+# 使用: docker-compose -f litellm.yml up -d
+# 依赖环境变量: DASHSCOPE_API_KEY（上游密钥）, LITELLM_MASTER_KEY（管理密钥）
+services:
+  litellm:
+    container_name: litellm-gateway
+    image: ghcr.io/berriai/litellm:main-stable
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml
+    environment:
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:?set DASHSCOPE_API_KEY}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health/liveliness"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    command: ["--config", "/app/config.yaml", "--port", "4000"]

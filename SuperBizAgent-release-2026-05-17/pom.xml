@@ -55,6 +55,12 @@
             <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
         </dependency>
 
+        <!-- Spring AI OpenAI 兼容核心库（liteLLM 网关：OpenAI 格式端点，手动构建模型，避免 starter 自动配置副作用） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-openai</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>com.alibaba.cloud.ai</groupId>
             <artifactId>spring-ai-alibaba-agent-framework</artifactId>

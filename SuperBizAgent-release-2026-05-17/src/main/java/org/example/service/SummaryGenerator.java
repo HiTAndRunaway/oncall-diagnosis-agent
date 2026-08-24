@@ -1,14 +1,12 @@
 package org.example.service;
 
-import com.alibaba.cloud.ai.dashscope.api.DashScopeApi;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
+import org.example.config.ChatModelFactory;
 import org.example.config.ModelProperties;
 import org.example.config.SessionRedisProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -43,10 +41,10 @@ public class SummaryGenerator {
     private SessionRedisProperties props;
 
     @Autowired
-    private ModelProperties modelProperties;
+    private ChatModelFactory chatModelFactory;
 
-    @Value("${spring.ai.dashscope.api-key}")
-    private String dashScopeApiKey;
+    @Autowired
+    private ModelProperties modelProperties;
 
     /**
      * 异步触发摘要生成
@@ -115,24 +113,12 @@ public class SummaryGenerator {
     }
 
     /**
-     * 调用 LLM 生成摘要
+     * 调用 LLM 生成摘要（经 ChatModelFactory 构建，支持 liteLLM 网关切换）
      */
     private String generateSummary(String prompt) {
         try {
-            DashScopeApi dashScopeApi = DashScopeApi.builder()
-                    .apiKey(dashScopeApiKey)
-                    .build();
-
             ModelProperties.ModelConfig cfg = modelProperties.getLightweight();
-            DashScopeChatModel chatModel = DashScopeChatModel.builder()
-                    .dashScopeApi(dashScopeApi)
-                    .defaultOptions(DashScopeChatOptions.builder()
-                            .withModel(cfg.getName())
-                            .withTemperature(cfg.getTemperature())
-                            .withMaxToken(cfg.getMaxToken())
-                            .withTopP(cfg.getTopP())
-                            .build())
-                    .build();
+            ChatModel chatModel = chatModelFactory.create(cfg);
 
             // 使用 call 方法进行非流式调用
             String response = chatModel.call(prompt);

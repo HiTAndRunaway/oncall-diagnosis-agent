@@ -207,6 +207,11 @@ resilience4j:
         failure-rate-threshold: 50
         wait-duration-in-open-state: 30s
         permitted-number-of-calls-in-half-open-state: 3
+      litellm-llm:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
   ratelimiter:
     instances:
       file-upload:
@@ -258,6 +263,13 @@ superbiz:
       /api/v1/chat_stream:
         capacity: 10
         refill-rate: 2
+
+# ==================== liteLLM 大模型网关配置 ====================
+# enabled=false（默认）时系统保持 DashScope 直连；true 时所有模型调用走 liteLLM OpenAI 兼容网关
+litellm:
+  enabled: false
+  base-url: http://localhost:4000
+  api-key: ${LITELLM_API_KEY:sk-litellm-change-me}
 
 # ==================== 分层模型配置 ====================
 ai:

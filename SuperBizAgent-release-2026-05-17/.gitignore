@@ -54,3 +54,9 @@ uploads/
 ### docker
 /volumes
 /server.pid
+
+### local build settings (Maven local repo override, machine-specific)
+.mvn-settings.xml
+
+### liteLLM gateway local runtime data
+/litellm/logs

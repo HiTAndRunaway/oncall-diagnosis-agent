@@ -1,14 +1,14 @@
 package org.example.agent.router;
 
-import com.alibaba.cloud.ai.dashscope.api.DashScopeApi;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.config.ChatModelFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -26,8 +26,8 @@ public class IntentRouter {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @Value("${spring.ai.dashscope.api-key}")
-    private String dashScopeApiKey;
+    @Autowired
+    private ChatModelFactory chatModelFactory;
 
     @Value("${intent.router.enabled:true}")
     private boolean enabled;
@@ -64,22 +64,10 @@ public class IntentRouter {
     }
 
     /**
-     * 调用 qwen-turbo 进行意图分类
+     * 调用意图分类 LLM（经 ChatModelFactory 构建，支持 liteLLM 网关切换）
      */
     private String callClassificationLLM(String userInput) {
-        DashScopeApi api = DashScopeApi.builder()
-                .apiKey(dashScopeApiKey)
-                .build();
-
-        DashScopeChatModel chatModel = DashScopeChatModel.builder()
-                .dashScopeApi(api)
-                .defaultOptions(DashScopeChatOptions.builder()
-                        .withModel(model)
-                        .withTemperature(0.1)
-                        .withMaxToken(200)
-                        .withTopP(0.9)
-                        .build())
-                .build();
+        ChatModel chatModel = chatModelFactory.create(model, 0.1, 200, 0.9);
 
         String classificationPrompt = buildClassificationPrompt(userInput);
         Prompt prompt = new Prompt(new UserMessage(classificationPrompt));
