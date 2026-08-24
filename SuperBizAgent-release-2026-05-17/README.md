@@ -49,14 +49,82 @@
 | 技术 | 版本 | 说明 |
 |------|------|------|
 | Java | 17 | 开发语言 |
-| Spring Boot | 3.2.0 | 应用框架 |
-| Spring AI Alibaba | 1.1.0.0-RC2 | AI Agent 框架（DashScope + SupervisorAgent） |
+| Spring Boot | 3.5.15 | 应用框架 |
+| Spring AI | 1.1.2 | AI 抽象层（ChatModel / Embedding） |
+| Spring AI Alibaba | 1.1.2.0 | AI Agent 框架（DashScope + SupervisorAgent） |
 | DashScope SDK | 2.17.0 | 阿里云 AI 服务（LLM + Embedding + Rerank） |
+| Spring AI OpenAI | 1.1.2 | liteLLM 网关 OpenAI 兼容客户端 |
 | Milvus SDK | 2.6.10 | 向量数据库客户端 |
-| Resilience4j | 2.2.0 | 断路器 + 限流 |
+| Resilience4j | 2.3.0 | 断路器 + 限流 |
 | Bucket4j | 8.10.1 | 令牌桶限流 |
 | PDFBox | 3.0.3 | PDF 文本提取 |
 | Lombok | 1.18.30 | 代码生成 |
+
+## 🧭 liteLLM 大模型网关（2026-08 新增）
+
+接入 [liteLLM](https://github.com/BerriAI/litellm) 作为 OpenAI 兼容的大模型网关，统一管理模型调用与成本。**DashScope 保留为 fallback，一键切换**。
+
+### 架构
+
+```
+SuperBizAgent (Spring Boot :9900)
+  ├─ ChatModelFactory / LlmProvider（聊天/AIOps/意图/摘要/改写）
+  ├─ VectorEmbeddingService（向量化 /v1/embeddings）
+  └─ VectorSearchService（RAG 重排序 /v1/rerank）
+        │  litellm.enabled=true 时
+        ▼
+liteLLM 网关（独立 Docker 容器 :4000）──▶ DashScope API（唯一上游）
+```
+
+### 两种模式
+
+| 模式 | 配置 | 行为 |
+|------|------|------|
+| **直连模式（默认）** | `litellm.enabled: false` | 保持 DashScope 直连，与改造前完全一致 |
+| **网关模式** | `litellm.enabled: true` | 所有模型调用经 liteLLM 网关转发 |
+
+### 启用步骤
+
+```bash
+# 1. 启动 Docker Desktop，设置网关环境变量
+export DASHSCOPE_API_KEY=sk-百炼key        # 上游密钥（网关侧）
+export LITELLM_MASTER_KEY=sk-管理密钥       # 网关管理密钥
+
+# 2. 启动 liteLLM 网关（首次自动拉镜像，稍等）
+make litellm-up
+make litellm-health                          # 健康检查
+
+# 3. 创建虚拟密钥（应用侧调用网关用，从返回 JSON 的 "key" 字段取值）
+curl -X POST http://localhost:4000/key/generate \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"models": ["qwen3-max","qwen-turbo","text-embedding-v4","gte-rerank-v2"]}'
+
+# 4. 打开网关开关（application.yml）
+#    litellm.enabled: true
+#    litellm.api-key: sk-虚拟密钥（或设环境变量 LITELLM_API_KEY）
+
+# 5. 启动应用（本地无 MCP 端点时设 MCP_CLIENT_ENABLED=false）
+make start
+```
+
+> ⚠️ 网关模式启用时应用侧**不再需要** `DASHSCOPE_API_KEY`（上游密钥集中在网关容器）；`litellm.enabled=true` 且 `api-key` 未配置时应用会 fail-fast 拒绝启动。
+
+### 配置说明（application.yml）
+
+```yaml
+litellm:
+  enabled: false                      # true=走 liteLLM 网关，false=DashScope 直连
+  base-url: http://localhost:4000     # 网关地址
+  api-key: ${LITELLM_API_KEY:sk-litellm-change-me}  # 虚拟密钥
+```
+
+模型注册表在 `litellm/config.yaml`（仅网关使用，`model_name` 与 `application.yml` 模型名严格对齐），容器编排在 `litellm.yml`。
+
+### 回滚
+
+把 `litellm.enabled` 改回 `false` 重启即恢复 DashScope 直连，无需改代码。
+
 
 ## 📦 项目结构
 
@@ -100,6 +168,10 @@ SuperBizAgent/
 │   │       ├── TextDocumentParser.java
 │   │       └── PdfDocumentParser.java
 │   ├── agent/                            # Agent 模块
+│   │   ├── LlmProvider.java              # LLM 服务抽象接口
+│   │   ├── DashScopeLlmProvider.java     # DashScope 实现（litellm.enabled=false 时注册）
+│   │   ├── LiteLlmProvider.java          # liteLLM 网关实现（litellm.enabled=true 时注册）🆕
+│   │   ├── ReactAgentRunner.java         # Agent 执行器（SupervisorAgent 编排）
 │   │   ├── tool/                         # Agent 工具集
 │   │   │   ├── DateTimeTools.java        # 当前时间
 │   │   │   ├── InternalDocsTools.java    # 内部文档检索
@@ -130,6 +202,9 @@ SuperBizAgent/
 │   │   ├── ApiKeyAuthManager.java
 │   │   └── RateLimitInterceptor.java
 │   ├── config/                           # 配置类
+│   │   ├── ChatModelFactory.java         # 模型统一构建（网关/直连开关收敛点）🆕
+│   │   ├── LiteLlmProperties.java        # liteLLM 网关配置属性 🆕
+│   │   ├── ModelProperties.java          # 分层模型配置
 │   │   ├── SecurityConfig.java           # Spring Security 配置
 │   │   ├── ApiKeyProperties.java         # API Key 配置属性
 │   │   ├── RateLimitConfig.java          # 限流配置
@@ -172,6 +247,10 @@ SuperBizAgent/
 │   ├── 2026-07-27-security-auth-design.md
 │   └── 2026-07-28-aiops-agent-quality-design.md
 ├── session/                              # 会话级产出（方案 / 测试报告）
+├── litellm/                              # liteLLM 网关配置 🆕
+│   └── config.yaml                       # 模型注册表（仅网关使用）
+├── litellm.yml                           # liteLLM Docker Compose 编排 🆕
+├── .env.example                          # 环境变量模板 🆕
 ├── vector-database.yml                   # Docker Compose（Milvus + etcd + MinIO）
 ├── Makefile                              # 一键启动脚本
 └── pom.xml
@@ -318,17 +397,27 @@ resilience4j:
   circuitbreaker:
     instances:
       dashscope-llm:        # LLM 调用熔断
+      litellm-llm:          # liteLLM 网关调用熔断
       dashscope-embedding:  # Embedding 调用熔断
       milvus-search:        # Milvus 搜索熔断
   ratelimiter:
     instances:
       file-upload:          # 上传限流: 10次/分钟
+
+# liteLLM 大模型网关 🆕
+litellm:
+  enabled: false                     # true=走网关，false=DashScope 直连
+  base-url: http://localhost:4000
+  api-key: ${LITELLM_API_KEY:sk-litellm-change-me}
 ```
 
 ### 环境变量
 
 ```bash
-export DASHSCOPE_API_KEY=your-api-key   # 必需
+export DASHSCOPE_API_KEY=your-api-key      # 必需（直连模式：应用侧；网关模式：网关侧）
+export LITELLM_MASTER_KEY=sk-xxx           # 网关管理密钥（网关模式必需）
+export LITELLM_API_KEY=sk-xxx              # 网关虚拟密钥（网关模式必需）
+export MCP_CLIENT_ENABLED=false            # 本地无 MCP 端点时关闭
 ```
 
 ## 🚀 快速开始
@@ -395,6 +484,8 @@ curl -X POST http://localhost:9900/api/upload \
 curl http://localhost:9900/milvus/health
 ```
 
+> 💡 **启用 liteLLM 网关模式**：先 `make litellm-up` 起网关（配置见上「🧭 liteLLM 大模型网关」），再把 `application.yml` 的 `litellm.enabled` 改为 `true` 后重启应用，所有模型调用自动经网关转发。
+
 ## 🧪 测试
 
 ```bash
@@ -407,11 +498,20 @@ mvn clean compile
 
 ---
 
-**版本**: v1.2.0  
+**版本**: v1.3.0  
 **作者**: chief  
 **许可证**: MIT
 
 ## 📝 更新日志
+
+### v1.3.0 (2026-08-24)
+- 🧭 **liteLLM 大模型网关**: 接入 OpenAI 兼容网关（`litellm.enabled` 开关，DashScope 保留为 fallback）
+- 🔌 **模型构建收敛**: 新增 `ChatModelFactory` 统一 8 处模型构建（聊天/AIOps/意图/摘要/改写），网关与直连一键切换
+- 🛡️ **双 Provider 二选一**: `LiteLlmProvider`（网关）/ `DashScopeLlmProvider`（直连）条件注册，互不冲突
+- 🧠 **Embedding / Rerank 网关化**: `VectorEmbeddingService`（`/v1/embeddings`）、`VectorSearchService`（`/v1/rerank`）支持网关分支
+- 🔐 **fail-fast 校验**: 网关模式启动时校验 base-url 与虚拟密钥，避免带病运行
+- 📦 **网关部署**: `litellm/config.yaml` + `litellm.yml`（Docker Compose）+ Makefile `litellm-up/down/health` + `.env.example`
+- 🧪 **测试增强**: 新增 7 个测试类（属性绑定 / 工厂开关 / 参数透传 / 双模式上下文 / 网关响应解析），全量 36 测试通过
 
 ### v1.2.0 (2026-07-28)
 - 🧭 **意图识别路由**: 基于 qwen-turbo 自动分类请求意图，分发到 AIOps / RAG / 通用对话管道
