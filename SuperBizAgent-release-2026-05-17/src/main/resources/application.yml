@@ -134,7 +134,7 @@ rag:
 
 # Agent Skills 配置（spring-ai-alibaba 1.1.2.0 能力；false=纯预留，行为与现状完全一致）
 skills:
-  enabled: false                       # 总开关：true 时对话/AIOps Agent 注入技能清单 + read_skill 工具
+  enabled: true                        # 总开关：true 时对话/AIOps Agent 注入技能清单 + read_skill 工具
   registry: classpath                  # 技能来源：classpath（随 jar 打包）| filesystem（项目/用户目录，可热更新）
   classpath-path: skills               # registry=classpath 时的资源目录（src/main/resources/skills）
   classpath-base-path:                 # classpath 技能复制到的本地目录（留空=系统临时目录）
