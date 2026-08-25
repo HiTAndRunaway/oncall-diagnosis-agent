@@ -110,7 +110,7 @@ rag:
     vector-weight: 1.0     # 向量路 RRF 权重
     rrf-k: 60              # RRF 平滑常数
   rewrite:
-    strategy: direct           # 查询改写策略: prompt_rewrite | hypothetical_answer | detail_abstract | direct
+    strategy: prompt_rewrite   # 查询改写策略: prompt_rewrite | hypothetical_answer | detail_abstract | direct
     model: qwen-turbo          # 改写用的轻量 LLM 模型
     retry:
       max-attempts: 3          # 超时类错误最大重试次数

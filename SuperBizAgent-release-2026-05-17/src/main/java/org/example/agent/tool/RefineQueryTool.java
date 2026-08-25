@@ -39,9 +39,10 @@ public class RefineQueryTool {
             logger.info("refineQuery: query=[{}], feedback=[{}]",
                     ToolUtils.truncate(query, 100), ToolUtils.truncate(feedback, 200));
 
-            // 使用 QueryRewriteService 进行改写
-            // 注意：当前版本复用标准改写流程，后续可扩展支持 feedback 参数
-            String rewritten = queryRewriteService.rewrite(query);
+            // 使用 QueryRewriteService 进行反馈感知改写：
+            // 将 evaluateSearchResults 的评估反馈（summary/evaluations）传入，让改写后的查询
+            // 更有针对性（哪些结果无关、缺什么信息）。feedback 为空时退化为普通改写。
+            String rewritten = queryRewriteService.rewriteWithFeedback(query, feedback);
 
             if (rewritten == null || rewritten.trim().isEmpty() || rewritten.equals(query)) {
                 logger.warn("refineQuery: 改写未产生变化，返回原查询");

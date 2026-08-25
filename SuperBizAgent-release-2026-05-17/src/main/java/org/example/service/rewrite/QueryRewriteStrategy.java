@@ -23,6 +23,22 @@ public interface QueryRewriteStrategy {
     String rewrite(String originalQuery);
 
     /**
+     * 依据检索评估反馈改写查询（Agentic RAG 的 refine 环节专用）。
+     * <p>
+     * 在 {@link #rewrite(String)} 的基础上，额外利用上一轮 {@code evaluateSearchResults}
+     * 产生的反馈（哪些结果无关、缺什么信息），让改写后的查询更有针对性。
+     * <p>
+     * 默认实现忽略 feedback，退化为 {@link #rewrite(String)}；需要真正利用反馈的策略应覆写本方法。
+     *
+     * @param originalQuery 原始用户问题
+     * @param feedback      检索评估反馈文本（可为 null / 空，此时等同无反馈）
+     * @return 改写后的文本（用于 embedding）
+     */
+    default String rewrite(String originalQuery, String feedback) {
+        return rewrite(originalQuery);
+    }
+
+    /**
      * 是否需要 LLM 调用
      * 用于协调服务判断是否跳过缓存和重试逻辑
      */

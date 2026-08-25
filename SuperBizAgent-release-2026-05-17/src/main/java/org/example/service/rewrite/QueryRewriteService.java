@@ -75,33 +75,47 @@ public class QueryRewriteService {
     }
 
     /**
-     * 改写查询文本（主入口）
+     * 改写查询文本（主入口，无反馈）
      *
      * @param originalQuery 原始用户问题
      * @return 改写后的文本（降级时返回原始 query）
      */
     public String rewrite(String originalQuery) {
+        return rewriteWithFeedback(originalQuery, null);
+    }
+
+    /**
+     * 改写查询文本（可结合检索评估反馈）——Agentic RAG refine 环节专用入口。
+     * <p>
+     * 传入非空 {@code feedback} 时，改写策略会利用评估结果生成更有针对性的查询；
+     * {@code feedback} 为 null/空时行为等同于 {@link #rewrite(String)}。
+     *
+     * @param originalQuery 原始用户问题
+     * @param feedback      检索评估反馈文本（来自 evaluateSearchResults 的 summary/evaluations），可为 null
+     * @return 改写后的文本（降级时返回原始 query）
+     */
+    public String rewriteWithFeedback(String originalQuery, String feedback) {
         if (originalQuery == null || originalQuery.trim().isEmpty()) {
             return originalQuery;
         }
 
-        // 无需 LLM 的策略跳过缓存和重试
+        // 无需 LLM 的策略跳过缓存和重试（feedback 对无 LLM 策略无意义）
         if (!strategy.requiresLlm()) {
             return strategy.rewrite(originalQuery);
         }
 
-        // 检查 Redis 缓存
-        String cached = getCachedRewrite(originalQuery);
+        // 检查 Redis 缓存（key 含 feedback，保证不同反馈结果不互相污染）
+        String cached = getCachedRewrite(originalQuery, feedback);
         if (cached != null) {
             return cached;
         }
 
         // 调用 LLM 改写（含重试和降级）
-        String rewritten = rewriteWithRetry(originalQuery);
+        String rewritten = rewriteWithRetry(originalQuery, feedback);
 
         // 写入缓存
         if (!rewritten.equals(originalQuery)) {
-            cacheRewriteAsync(originalQuery, rewritten);
+            cacheRewriteAsync(originalQuery, feedback, rewritten);
         }
 
         return rewritten;
@@ -109,18 +123,22 @@ public class QueryRewriteService {
 
     // === 缓存 ===
 
-    private String buildCacheKey(String originalQuery) {
+    private String buildCacheKey(String originalQuery, String feedback) {
         String hash = md5(originalQuery);
         String strategyName = properties.getStrategy().name().toLowerCase();
-        return CACHE_KEY_PREFIX + strategyName + ":" + hash;
+        // 有反馈时追加反馈摘要，避免不同反馈互相污染缓存；无反馈保持原 key 格式以兼容历史缓存
+        if (feedback == null || feedback.trim().isEmpty()) {
+            return CACHE_KEY_PREFIX + strategyName + ":" + hash;
+        }
+        return CACHE_KEY_PREFIX + strategyName + ":" + hash + ":" + md5(feedback);
     }
 
-    private String getCachedRewrite(String originalQuery) {
+    private String getCachedRewrite(String originalQuery, String feedback) {
         if (!properties.getCache().isEnabled()) {
             return null;
         }
         try {
-            String key = buildCacheKey(originalQuery);
+            String key = buildCacheKey(originalQuery, feedback);
             String value = redisTemplate.opsForValue().get(key);
             if (value != null) {
                 logger.debug("查询改写命中缓存, strategy={}, key={}", properties.getStrategy(), key);
@@ -132,13 +150,13 @@ public class QueryRewriteService {
         return null;
     }
 
-    private void cacheRewriteAsync(String originalQuery, String rewritten) {
+    private void cacheRewriteAsync(String originalQuery, String feedback, String rewritten) {
         if (!properties.getCache().isEnabled()) {
             return;
         }
         CompletableFuture.runAsync(() -> {
             try {
-                String key = buildCacheKey(originalQuery);
+                String key = buildCacheKey(originalQuery, feedback);
                 Duration ttl = Duration.ofHours(properties.getCache().getTtlHours());
                 redisTemplate.opsForValue().set(key, rewritten, ttl);
                 logger.debug("查询改写结果已缓存, key={}, ttl={}h", key, properties.getCache().getTtlHours());
@@ -150,21 +168,23 @@ public class QueryRewriteService {
 
     // === LLM 调用 + 重试 + 降级 ===
 
-    private String rewriteWithRetry(String originalQuery) {
+    private String rewriteWithRetry(String originalQuery, String feedback) {
         int maxAttempts = properties.getRetry().getMaxAttempts();
         long backoffMs = properties.getRetry().getBackoff().getInitialInterval().toMillis();
         int multiplier = properties.getRetry().getBackoff().getMultiplier();
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                String rewritten = strategy.rewrite(originalQuery);
+                // 传入 feedback，支持策略实现"结合评估反馈改写"（无反馈时策略内部退化为普通改写）
+                String rewritten = strategy.rewrite(originalQuery, feedback);
 
                 // 如果 LLM 返回了与原 query 不同的有效内容，直接返回
                 if (rewritten != null && !rewritten.trim().isEmpty() && !rewritten.equals(originalQuery)) {
-                    logger.info("查询改写成功, strategy={}, original=[{}] → rewritten=[{}]",
+                    logger.info("查询改写成功, strategy={}, original=[{}] → rewritten=[{}], useFeedback={}",
                             properties.getStrategy(),
                             strategy.truncate(originalQuery),
-                            strategy.truncate(rewritten));
+                            strategy.truncate(rewritten),
+                            feedback != null && !feedback.trim().isEmpty());
                     return rewritten;
                 }
 
