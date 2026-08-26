@@ -115,6 +115,8 @@ make stop && make down
 
 4.代码审查完后需要解决审查出来的问题，审查完后再次测试，没问题后提交并推送到远程分支（失败可以重试，重试5次，如果不成功就停止）
 
+5.每次修改完代码之后都要更新README.md。
+
 ## Agent skills
 
 ### Issue tracker
