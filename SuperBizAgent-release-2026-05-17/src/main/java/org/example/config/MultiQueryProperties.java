@@ -1,5 +1,7 @@
 package org.example.config;
 
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
@@ -13,6 +15,8 @@ import org.springframework.context.annotation.Configuration;
  * <p>
  * 全有或全无（all-or-nothing）：开启后任何环节失败即整路放弃，降级为两路召回。
  */
+@Getter
+@Setter
 @Configuration
 @ConfigurationProperties(prefix = "rag.multi-query")
 public class MultiQueryProperties {
@@ -56,135 +60,15 @@ public class MultiQueryProperties {
     /** 缓存配置 */
     private Cache cache = new Cache();
 
-    // === getter/setter ===
-
-    public boolean isEnabled() {
-        return enabled;
-    }
-
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-    }
-
-    public int getMaxVariants() {
-        return maxVariants;
-    }
-
-    public void setMaxVariants(int maxVariants) {
-        this.maxVariants = maxVariants;
-    }
-
-    public String getModel() {
-        return model;
-    }
-
-    public void setModel(String model) {
-        this.model = model;
-    }
-
-    public double getTemperature() {
-        return temperature;
-    }
-
-    public void setTemperature(double temperature) {
-        this.temperature = temperature;
-    }
-
-    public int getMaxTokens() {
-        return maxTokens;
-    }
-
-    public void setMaxTokens(int maxTokens) {
-        this.maxTokens = maxTokens;
-    }
-
-    public int getTimeoutSeconds() {
-        return timeoutSeconds;
-    }
-
-    public void setTimeoutSeconds(int timeoutSeconds) {
-        this.timeoutSeconds = timeoutSeconds;
-    }
-
-    public int getVariantRecallCount() {
-        return variantRecallCount;
-    }
-
-    public void setVariantRecallCount(int variantRecallCount) {
-        this.variantRecallCount = variantRecallCount;
-    }
-
-    public int getVariantTopK() {
-        return variantTopK;
-    }
-
-    public void setVariantTopK(int variantTopK) {
-        this.variantTopK = variantTopK;
-    }
-
-    public String getVariantSearchMode() {
-        return variantSearchMode;
-    }
-
-    public void setVariantSearchMode(String variantSearchMode) {
-        this.variantSearchMode = variantSearchMode;
-    }
-
-    public int getVariantRrfK() {
-        return variantRrfK;
-    }
-
-    public void setVariantRrfK(int variantRrfK) {
-        this.variantRrfK = variantRrfK;
-    }
-
-    public double getWeight() {
-        return weight;
-    }
-
-    public void setWeight(double weight) {
-        this.weight = weight;
-    }
-
-    public String getAnglePrompt() {
-        return anglePrompt;
-    }
-
-    public void setAnglePrompt(String anglePrompt) {
-        this.anglePrompt = anglePrompt;
-    }
-
-    public Cache getCache() {
-        return cache;
-    }
-
-    public void setCache(Cache cache) {
-        this.cache = cache;
-    }
-
     /**
      * 缓存配置
      */
+    @Getter
+    @Setter
     public static class Cache {
         /** 是否启用 Redis 缓存 */
         private boolean enabled = true;
         /** 缓存过期时间（小时） */
         private int ttlHours = 1;
-
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
-
-        public int getTtlHours() {
-            return ttlHours;
-        }
-
-        public void setTtlHours(int ttlHours) {
-            this.ttlHours = ttlHours;
-        }
     }
 }

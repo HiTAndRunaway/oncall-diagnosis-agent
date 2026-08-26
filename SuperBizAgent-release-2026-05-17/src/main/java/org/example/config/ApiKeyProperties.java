@@ -1,6 +1,9 @@
 package org.example.config;
 
 import jakarta.annotation.PostConstruct;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
@@ -13,6 +16,8 @@ import java.util.Map;
  * API Key 认证配置属性
  * 前缀：superbiz.security
  */
+@Getter
+@Setter
 @Configuration
 @ConfigurationProperties("superbiz.security")
 public class ApiKeyProperties {
@@ -29,7 +34,9 @@ public class ApiKeyProperties {
     /** CORS 配置 */
     private CorsConfig cors = new CorsConfig();
 
-    /** API Key 到条目的 O(1) 查找表 */
+    /** API Key 到条目的 O(1) 查找表（内部缓存，不对外暴露 getter/setter） */
+    @Getter(AccessLevel.NONE)
+    @Setter(AccessLevel.NONE)
     private Map<String, ApiKeyEntry> lookup;
 
     @PostConstruct
@@ -53,123 +60,29 @@ public class ApiKeyProperties {
         return lookup != null ? lookup.get(apiKey) : null;
     }
 
-    // ===== Getters & Setters =====
-
-    public boolean isEnabled() {
-        return enabled;
-    }
-
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-    }
-
-    public String getApiKeyHeader() {
-        return apiKeyHeader;
-    }
-
-    public void setApiKeyHeader(String apiKeyHeader) {
-        this.apiKeyHeader = apiKeyHeader;
-    }
-
-    public List<ApiKeyEntry> getApiKeys() {
-        return apiKeys;
-    }
-
-    public void setApiKeys(List<ApiKeyEntry> apiKeys) {
-        this.apiKeys = apiKeys;
-    }
-
-    public CorsConfig getCors() {
-        return cors;
-    }
-
-    public void setCors(CorsConfig cors) {
-        this.cors = cors;
-    }
-
     // ===== 嵌套配置类 =====
 
     /**
      * API Key 条目：key / userId / description
      */
+    @Getter
+    @Setter
     public static class ApiKeyEntry {
         private String key;
         private String userId;
         private String description;
-
-        public String getKey() {
-            return key;
-        }
-
-        public void setKey(String key) {
-            this.key = key;
-        }
-
-        public String getUserId() {
-            return userId;
-        }
-
-        public void setUserId(String userId) {
-            this.userId = userId;
-        }
-
-        public String getDescription() {
-            return description;
-        }
-
-        public void setDescription(String description) {
-            this.description = description;
-        }
     }
 
     /**
      * CORS 配置子项
      */
+    @Getter
+    @Setter
     public static class CorsConfig {
         private boolean allowCredentials = false;
         private List<String> allowedOrigins = new ArrayList<>();
         private List<String> allowedMethods = new ArrayList<>();
         private List<String> allowedHeaders = new ArrayList<>();
         private long maxAge = 3600;
-
-        public boolean isAllowCredentials() {
-            return allowCredentials;
-        }
-
-        public void setAllowCredentials(boolean allowCredentials) {
-            this.allowCredentials = allowCredentials;
-        }
-
-        public List<String> getAllowedOrigins() {
-            return allowedOrigins;
-        }
-
-        public void setAllowedOrigins(List<String> allowedOrigins) {
-            this.allowedOrigins = allowedOrigins;
-        }
-
-        public List<String> getAllowedMethods() {
-            return allowedMethods;
-        }
-
-        public void setAllowedMethods(List<String> allowedMethods) {
-            this.allowedMethods = allowedMethods;
-        }
-
-        public List<String> getAllowedHeaders() {
-            return allowedHeaders;
-        }
-
-        public void setAllowedHeaders(List<String> allowedHeaders) {
-            this.allowedHeaders = allowedHeaders;
-        }
-
-        public long getMaxAge() {
-            return maxAge;
-        }
-
-        public void setMaxAge(long maxAge) {
-            this.maxAge = maxAge;
-        }
     }
 }
