@@ -34,11 +34,12 @@ make stop && make down
 这是一个基于 **Spring Boot 3.2 + Spring AI Alibaba Agent Framework** 的应用，包含两个核心子系统：
 
 ### 1. RAG（检索增强生成）
-**流水线**：文件上传 → 文档分块 → DashScope text-embedding-v4 → Milvus 向量数据库 → 相似度搜索 → DashScope LLM 生成答案。
+**流水线**：文件上传 → 文档分块 → DashScope text-embedding-v4 → Milvus 向量数据库 → 三路混合召回（RRF 融合）→ Rerank 重排序 → DashScope LLM 生成答案。
 
 关键类流程：
 - `FileUploadController` → `VectorIndexService.indexSingleFile()` → `DocumentChunkService`（按 Markdown 标题分割，最大 800 字符，100 字符重叠） → `VectorEmbeddingService`（DashScope API） → Milvus 插入
-- 查询：`InternalDocsTools.queryInternalDocs()` → `VectorSearchService.searchSimilarDocuments()`（使用 L2 距离度量） → 将 Top-K 结果以 JSON 形式返回给 Agent
+- 查询：`InternalDocsTools.queryInternalDocs()` → `VectorSearchService.searchSimilarDocuments()`（三路并行召回：Dense 向量路 L2 距离 + BM25 稀疏路 + 可选多角度查询路，RRF 融合 + 可选 Rerank） → 将 Top-K 结果以 JSON 形式返回给 Agent
+- 多角度查询路（`rag.multi-query.enabled=true` 时启用，默认关闭）：`MultiQueryExpander` 用轻量 LLM 将问题改写为 N 个角度变体（不含原始查询，默认 5 个，`max-variants` 可配置），变体并行检索后变体间 RRF 融合，再与 Dense/BM25 两路做三路 RRF；该路**全有或全无**——任何环节失败直接降级为两路召回
 - `RagService` 也可单独用于流式 RAG 回答（默认使用 `qwen3-max` 模型）
 
 ### 2. AIOps 多智能体系统

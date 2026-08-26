@@ -66,14 +66,15 @@ public class AsyncConfig implements AsyncConfigurer {
 
     /**
      * 混合检索专用线程池
-     * 为双路并行召回（dense + sparse）提供线程资源
+     * 为三路并行召回（dense + sparse + 多角度查询）提供线程资源：
+     * 3 路并行 + 多角度路内部 N 个变体并行（默认 5），上调容量避免排队
      */
     @Bean("searchExecutor")
     public Executor searchExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(2);
-        executor.setMaxPoolSize(4);
-        executor.setQueueCapacity(10);
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(8);
+        executor.setQueueCapacity(20);
         executor.setKeepAliveSeconds(30);
         executor.setThreadNamePrefix("search-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy() {

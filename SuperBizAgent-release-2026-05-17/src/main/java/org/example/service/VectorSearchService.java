@@ -13,6 +13,8 @@ import lombok.Setter;
 import org.example.config.LiteLlmProperties;
 import org.example.config.MilvusProperties;
 import org.example.constant.MilvusConstants;
+import org.example.service.multiquery.MultiQueryExpander;
+import org.example.service.multiquery.QueryVariant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -65,6 +67,28 @@ public class VectorSearchService {
 
     @Autowired
     private LiteLlmProperties liteLlmProperties;
+
+    @Autowired(required = false)
+    private MultiQueryExpander multiQueryExpander;
+
+    // ===== 多角度查询路配置（Road C） =====
+    @Value("${rag.multi-query.enabled:false}")
+    private boolean multiQueryEnabled;
+
+    @Value("${rag.multi-query.weight:1.0}")
+    private double multiQueryWeight;
+
+    @Value("${rag.multi-query.variant-recall-count:10}")
+    private int variantRecallCount;
+
+    @Value("${rag.multi-query.variant-top-k:30}")
+    private int variantTopK;
+
+    @Value("${rag.multi-query.variant-search-mode:dense}")
+    private String variantSearchMode;
+
+    @Value("${rag.multi-query.variant-rrf-k:60}")
+    private int variantRrfK;
 
     // ===== 重排序配置 =====
     @Value("${rag.rerank.enabled:true}")
@@ -121,19 +145,26 @@ public class VectorSearchService {
             List<SearchResult> results;
 
             if (hybridEnabled) {
-                // === 双路并行召回 ===
+                // === 三路并行召回（dense + sparse + 多角度查询） ===
 
-                // 1. 异步执行向量检索
+                // 1. 异步执行向量检索（必须成功）
                 CompletableFuture<List<SearchResult>> denseFuture =
                         CompletableFuture.supplyAsync(
                                 () -> denseSearch(query, fetchCount), searchExecutor);
 
-                // 2. 异步执行 BM25 稀疏检索
+                // 2. 异步执行 BM25 稀疏检索（可降级路径）
                 CompletableFuture<List<SearchResult>> sparseFuture =
                         CompletableFuture.supplyAsync(
                                 () -> sparseSearch(query, fetchCount), searchExecutor);
 
-                // 3. 等待密集路完成（必须成功）
+                // 3. 异步执行多角度查询检索（可选路，全有或全无：失败整路放弃）
+                CompletableFuture<List<SearchResult>> multiQueryFuture = null;
+                if (multiQueryEnabled && multiQueryExpander != null) {
+                    multiQueryFuture = CompletableFuture.supplyAsync(
+                            () -> multiQuerySearch(query), searchExecutor);
+                }
+
+                // 4. 等待密集路完成（必须成功）
                 List<SearchResult> denseResults;
                 try {
                     denseResults = denseFuture.get(30, TimeUnit.SECONDS);
@@ -142,7 +173,7 @@ public class VectorSearchService {
                     throw new RuntimeException("向量检索失败: " + e.getMessage(), e);
                 }
 
-                // 4. 等待稀疏路完成（可降级路径）
+                // 5. 等待稀疏路完成（可降级路径）
                 List<SearchResult> sparseResults;
                 try {
                     sparseResults = sparseFuture.get(30, TimeUnit.SECONDS);
@@ -151,14 +182,31 @@ public class VectorSearchService {
                     sparseResults = Collections.emptyList();
                 }
 
-                // 5. 判断是否需要 RRF 融合
-                if (sparseResults.isEmpty()) {
-                    logger.info("BM25 路无结果，直接使用向量路");
-                    results = denseResults;
-                } else {
-                    // 6. RRF 融合
-                    results = rrfFusion(denseResults, sparseResults, fetchCount);
+                // 6. 等待多角度路完成（内部已整路降级为空列表，此处仅兜底）
+                List<SearchResult> multiQueryResults = Collections.emptyList();
+                if (multiQueryFuture != null) {
+                    try {
+                        multiQueryResults = multiQueryFuture.get(30, TimeUnit.SECONDS);
+                    } catch (Exception e) {
+                        logger.warn("多角度查询路异常，降级为两路召回: {}", e.getMessage());
+                        multiQueryResults = Collections.emptyList();
+                    }
                 }
+
+                // 7. 多路 RRF 融合（空路自然不贡献分数）
+                List<List<SearchResult>> resultLists = new ArrayList<>();
+                List<Double> weights = new ArrayList<>();
+                resultLists.add(denseResults);
+                weights.add(vectorWeight);
+                if (!sparseResults.isEmpty()) {
+                    resultLists.add(sparseResults);
+                    weights.add(bm25Weight);
+                }
+                if (!multiQueryResults.isEmpty()) {
+                    resultLists.add(multiQueryResults);
+                    weights.add(multiQueryWeight);
+                }
+                results = rrfFusion(resultLists, weights, rrfK, fetchCount);
 
             } else {
                 // === 单路向量召回（原有逻辑） ===
@@ -167,7 +215,7 @@ public class VectorSearchService {
 
             logger.info("召回 {} 个候选文档", results.size());
 
-            // 7. 重排序（现有逻辑不变）
+            // 8. 重排序（现有逻辑不变）
             if (rerankEnabled && results.size() > rerankThreshold) {
                 results = rerank(query, results);
             } else if (results.size() > topK) {
@@ -315,6 +363,83 @@ public class VectorSearchService {
     }
 
     /**
+     * 多角度查询路（Road C）
+     * <p>
+     * 1. 通过 MultiQueryExpander 生成 {@code max-variants} 个角度变体（不含原始查询）；
+     * 2. 每个变体并行独立检索（默认 dense，可配 hybrid）；
+     * 3. 变体间等权 RRF 融合，取前 variant-top-k 条作为该路结果。
+     * <p>
+     * 全有或全无（all-or-nothing）：变体生成失败、任一变体检索失败、
+     * 融合异常等任何环节失败，均返回空列表（不抛异常），由调用方降级为两路召回。
+     *
+     * @param query 改写后的查询文本（用于生成变体）
+     * @return 多角度路召回结果；失败返回空列表
+     */
+    private List<SearchResult> multiQuerySearch(String query) {
+        // 1. 生成变体（空列表/异常 = 该路放弃）
+        List<QueryVariant> variants;
+        try {
+            variants = multiQueryExpander.expand(query);
+        } catch (Exception e) {
+            logger.warn("[MultiQuery] 变体生成异常，多角度路放弃: {}", e.getMessage());
+            return Collections.emptyList();
+        }
+        if (variants == null || variants.isEmpty()) {
+            logger.warn("[MultiQuery] 无可用查询变体，多角度路放弃");
+            return Collections.emptyList();
+        }
+
+        // 2. 变体并行检索（任一变体检索失败 → 整路放弃）
+        List<CompletableFuture<List<SearchResult>>> futures = new ArrayList<>();
+        for (QueryVariant variant : variants) {
+            futures.add(CompletableFuture.supplyAsync(
+                    () -> searchByVariant(variant), searchExecutor));
+        }
+
+        List<List<SearchResult>> variantResults = new ArrayList<>();
+        try {
+            for (CompletableFuture<List<SearchResult>> future : futures) {
+                variantResults.add(future.get(30, TimeUnit.SECONDS));
+            }
+        } catch (Exception e) {
+            logger.warn("[MultiQuery] 变体检索失败，多角度路整路放弃: {}", e.getMessage());
+            return Collections.emptyList();
+        }
+
+        // 过滤无结果的变体（合法空结果不算失败，直接跳过）
+        variantResults.removeIf(List::isEmpty);
+        if (variantResults.isEmpty()) {
+            logger.warn("[MultiQuery] 所有变体均无检索结果，多角度路放弃");
+            return Collections.emptyList();
+        }
+
+        // 3. 变体间等权 RRF 融合，取前 variantTopK 条
+        List<Double> equalWeights = Collections.nCopies(variantResults.size(), 1.0);
+        List<SearchResult> fused = rrfFusion(variantResults, equalWeights, variantRrfK, variantTopK);
+
+        logger.info("[MultiQuery] 多角度路召回: variants={}, 有效变体={}, 融合后={}",
+                variants.size(), variantResults.size(), fused.size());
+        return fused;
+    }
+
+    /**
+     * 单个变体的检索（dense 或 hybrid，由 variant-search-mode 配置决定）
+     */
+    private List<SearchResult> searchByVariant(QueryVariant variant) {
+        List<SearchResult> results = denseSearch(variant.query(), variantRecallCount);
+        if ("hybrid".equalsIgnoreCase(variantSearchMode)) {
+            List<SearchResult> sparse = sparseSearch(variant.query(), variantRecallCount);
+            if (!sparse.isEmpty()) {
+                results = rrfFusion(List.of(results, sparse),
+                        List.of(1.0, 1.0), variantRrfK, variantRecallCount);
+            }
+        }
+        logger.debug("[MultiQuery] 变体检索完成: angle={}, query=[{}], results={}",
+                variant.angle(), variant.query(), results.size());
+        return results;
+    }
+
+    /**
      * 调用 Milvus REST API 将查询文本分词并转为稀疏向量
      *
      * @param query 查询文本
@@ -381,40 +506,48 @@ public class VectorSearchService {
     }
 
     /**
-     * RRF（Reciprocal Rank Fusion）融合算法
-     * 对两路检索结果按排名进行加权融合，返回 topK 条
+     * RRF（Reciprocal Rank Fusion）融合算法（多路通用版）
+     * 对多路检索结果按排名进行加权融合，返回 topK 条。
+     * 空路（空列表）自然不贡献分数；权重缺失时按 1.0 处理。
      *
-     * @param denseResults  向量路结果（已按 score 降序）
-     * @param sparseResults BM25 路结果（已按 score 降序）
-     * @param topK          最终返回数量
+     * @param resultLists 各路检索结果列表（每路已按 score 降序）
+     * @param weights     各路权重（长度可与 resultLists 不同，缺失按 1.0）
+     * @param k           RRF 平滑常数
+     * @param topK        最终返回数量
      * @return RRF 融合后 topK 条结果
      */
-    private List<SearchResult> rrfFusion(List<SearchResult> denseResults,
-                                          List<SearchResult> sparseResults,
+    private List<SearchResult> rrfFusion(List<List<SearchResult>> resultLists,
+                                          List<Double> weights,
+                                          int k,
                                           int topK) {
+        if (resultLists == null || resultLists.isEmpty()) {
+            return new ArrayList<>();
+        }
+
         // RRF 分数 Map: id → RRF score
         LinkedHashMap<String, Double> rrfScores = new LinkedHashMap<>();
         // 保留原始 SearchResult 用于获取完整信息
         Map<String, SearchResult> resultMap = new LinkedHashMap<>();
 
-        // 处理向量路：记录排名（1-indexed）
-        for (int i = 0; i < denseResults.size(); i++) {
-            SearchResult r = denseResults.get(i);
-            String id = r.getId();
-            int rank = i + 1;  // 1-indexed rank
-            double contribution = vectorWeight / (rrfK + rank);
-            rrfScores.merge(id, contribution, Double::sum);
-            resultMap.putIfAbsent(id, r);
-        }
+        // 遍历每一路：记录排名（1-indexed）
+        for (int road = 0; road < resultLists.size(); road++) {
+            List<SearchResult> results = resultLists.get(road);
+            if (results == null || results.isEmpty()) {
+                continue;
+            }
+            double weight = (weights != null && road < weights.size()) ? weights.get(road) : 1.0;
 
-        // 处理 BM25 路：记录排名（1-indexed）
-        for (int i = 0; i < sparseResults.size(); i++) {
-            SearchResult r = sparseResults.get(i);
-            String id = r.getId();
-            int rank = i + 1;  // 1-indexed rank
-            double contribution = bm25Weight / (rrfK + rank);
-            rrfScores.merge(id, contribution, Double::sum);
-            resultMap.putIfAbsent(id, r);
+            for (int i = 0; i < results.size(); i++) {
+                SearchResult r = results.get(i);
+                if (r == null || r.getId() == null) {
+                    continue;
+                }
+                String id = r.getId();
+                int rank = i + 1;  // 1-indexed rank
+                double contribution = weight / (k + rank);
+                rrfScores.merge(id, contribution, Double::sum);
+                resultMap.putIfAbsent(id, r);
+            }
         }
 
         // 按 RRF 分数降序排列，取 topK
@@ -433,8 +566,7 @@ public class VectorSearchService {
                 })
                 .collect(Collectors.toList());
 
-        logger.info("RRF 融合完成: dense={}, sparse={}, fused={}",
-                denseResults.size(), sparseResults.size(), fused.size());
+        logger.info("RRF 融合完成: roads={}, fused={}", resultLists.size(), fused.size());
         return fused;
     }
 
