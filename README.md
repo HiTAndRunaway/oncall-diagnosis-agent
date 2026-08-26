@@ -8,8 +8,9 @@
 
 | 能力 | 描述 |
 |------|------|
-| **RAG 智能问答** | 文档上传 → 多策略分块 → Embedding → Milvus 向量库 → 混合检索（BM25 + 向量双路召回 + RRF 融合 + DashScope Rerank 重排）→ LLM 生成答案 |
+| **RAG 智能问答** | 文档上传 → 多策略分块 → Embedding → Milvus 向量库 → 混合检索（BM25 + 向量 + 可选多角度查询三路召回 + RRF 融合 + DashScope Rerank 重排）→ LLM 生成答案 |
 | **查询改写** | 4 种策略（prompt_rewrite / hypothetical_answer / detail_abstract / direct），支持 Redis 结果缓存与超时重试 |
+| **多角度查询召回** | 可选第三召回路（`rag.multi-query.enabled`）：LLM 将问题改写为 N 个角度变体（默认 5，可配置）并行检索，变体间 RRF 融合后参与三路 RRF；全有或全无降级，失败自动退回两路召回 |
 | **Agentic RAG** | Agent 在 ReAct 循环中自主编排：问题拆解 → 多轮检索 → 相关性评估 → 改写重试，带护栏（轮次 / 阈值 / 超时 / 降级） |
 | **AIOps 智能运维** | SupervisorAgent 编排 Planner-Executor 闭环，自动生成告警分析报告；超时保护 + LLM 兜底报告 + LLM-as-Judge 质量评估 |
 | **意图路由** | 基于 qwen-turbo 自动分类请求（告警排查 / 知识检索 / 通用对话），分发到不同 Agent 管道 |
@@ -217,8 +218,9 @@ DocumentParser ─策略──► TXT/MD/PDF 解析   QueryRewriteService ─策
 ChunkStrategyFactory ─策略──► 分块        VectorSearchService ─混合检索──►
    │                              ┌─ Dense Vector (L2, text-embedding-v4)
    ▼                              ├─ BM25 Sparse (IP, chinese_analyzer)
-VectorEmbedding ──► Milvus biz     ├─ RRF 融合 (bm25-weight / vector-weight / rrf-k)
-   collection                      └─ DashScope Rerank (gte-rerank-v2)
+VectorEmbedding ──► Milvus biz     ├─ 多角度查询路（可选，LLM 生成 N 个角度变体并行检索）
+   collection                      ├─ RRF 融合 (bm25-weight / vector-weight / multi-query-weight / rrf-k)
+                                   └─ DashScope Rerank (gte-rerank-v2)
                                         │
                                         ▼
                                    Top-K 结果 → Agent/LLM 生成答案
@@ -226,6 +228,7 @@ VectorEmbedding ──► Milvus biz     ├─ RRF 融合 (bm25-weight / vector
 
 - **分块策略**：heading（标题拆分，默认）/ fixed-size（固定大小）/ semantic（语义边界）/ parent-child（small-to-big），支持按扩展名覆盖（如 `txt: fixed-size`）。
 - **解析策略**：`TextDocumentParser`（TXT/MD）、`PdfDocumentParser`（PDFBox）。
+- **多角度查询路**（`rag.multi-query.enabled: true`，默认关闭灰度）：`MultiQueryExpander` 用轻量 LLM 按五类角度（KEYWORD / SCENE / SUB_QUESTION / CAUSE_STEP / COMPARE）将问题改写为 N 个查询变体（不含原始查询，`max-variants` 默认 5 可配置），变体并行检索（默认 dense）后变体间等权 RRF 融合，再与 Dense/BM25 两路做三路 RRF；该路**全有或全无**——LLM 失败 / 解析失败 / 任一变体检索失败均整路放弃，直接降级为两路召回（结果与关闭时完全等价）。
 - **Agentic RAG**（`rag.agentic.enabled: true`）：ReAct 循环中自主编排 `decomposeQuestion → searchKnowledgeBase → evaluateSearchResults → refineQuery → 综合答案`；护栏：最大 3 轮检索 / 相关性阈值 0.6 / 60s 超时 / 自动降级（use_best）。关闭后完全回退传统 RAG。
 
 ### 2. AIOps 多 Agent 运维
@@ -370,7 +373,7 @@ SuperBizAgent-release-2026-05-17/
 │   │   ├── MemorySearchService.java       # 记忆向量检索
 │   │   ├── MemoryDecayService.java        # 定时置信度衰减 + 过期清除
 │   │   ├── VectorIndexService.java        # 文档索引（策略模式）
-│   │   ├── VectorSearchService.java       # 混合检索（Dense + BM25 + RRF + Rerank）⭐
+│   │   ├── VectorSearchService.java       # 混合检索（Dense + BM25 + 多角度 + RRF + Rerank）⭐
 │   │   ├── VectorEmbeddingService.java    # DashScope 向量化
 │   │   ├── DocumentChunkService.java      # 文档分块调度
 │   │   ├── DashScopeLlmClient.java        # DashScope HTTP 客户端
@@ -391,6 +394,9 @@ SuperBizAgent-release-2026-05-17/
 │   │   │   ├── DirectStrategy.java
 │   │   │   ├── QueryRewriteService.java   # 改写协调（Redis 缓存 + 重试）
 │   │   │   └── QueryRewriteProperties.java
+│   │   ├── multiquery/                    # 多角度查询召回路（可选第三路）
+│   │   │   ├── QueryVariant.java          # 角度变体（index/query/angle/rationale）
+│   │   │   └── MultiQueryExpander.java    # LLM 生成变体 + Redis 缓存 + 全有或全无降级
 │   │   └── parser/                        # 文档解析（2 种）
 │   │       ├── DocumentParser.java
 │   │       ├── TextDocumentParser.java
@@ -489,11 +495,21 @@ rag:
     threshold: 10
     top-k: 10
     model: "gte-rerank-v2"
-  hybrid:                       # 混合召回（BM25 + 向量 + RRF）
+  hybrid:                       # 混合召回（BM25 + 向量 + 多角度查询 + RRF）
     enabled: true
     bm25-weight: 1.0
     vector-weight: 1.0
     rrf-k: 60
+  multi-query:                  # 多角度查询召回路（可选，默认关闭灰度）
+    enabled: false
+    max-variants: 5             # 生成的角度变体数量（不含原始查询，可配置）
+    model: qwen-turbo
+    variant-recall-count: 10    # 每个变体的检索召回数
+    variant-top-k: 30           # 变体间 RRF 融合后保留条数
+    variant-search-mode: dense  # dense | hybrid
+    variant-rrf-k: 60
+    weight: 1.0                 # 多角度路在三路 RRF 中的权重
+    cache: { enabled: true, ttl-hours: 1 }
   rewrite:                      # 查询改写
     strategy: direct            # prompt_rewrite | hypothetical_answer | detail_abstract | direct
     model: qwen-turbo
@@ -606,6 +622,7 @@ springdoc:
 | `memory.enabled` | true | 长期记忆系统 |
 | `rag.agentic.enabled` | false | Agentic RAG 多轮搜索 |
 | `rag.hybrid.enabled` | true | BM25 + 向量双路召回 |
+| `rag.multi-query.enabled` | false | 多角度查询召回路（可选第三路，全有或全无降级） |
 | `rag.rerank.enabled` | true | DashScope Rerank 重排序 |
 | `rag.rewrite.cache.enabled` | true | 查询改写结果缓存 |
 | `cls.mock-enabled` | false | CLS 日志模拟 vs MCP 真实 |
