@@ -37,6 +37,9 @@ public class GetSearchCapabilitiesTool {
     @Value("${rag.rewrite.strategy:direct}")
     private String rewriteStrategy;
 
+    @Value("${rag.multi-query.enabled:false}")
+    private boolean multiQueryEnabled;
+
     @Value("${rag.agentic.max-search-rounds:3}")
     private int maxSearchRounds;
 
@@ -51,14 +54,15 @@ public class GetSearchCapabilitiesTool {
 
         String hybridStatus = hybridEnabled ? "enabled" : "disabled";
         String rerankStatus = rerankEnabled ? "enabled" : "disabled";
+        String multiQueryStatus = multiQueryEnabled ? "enabled" : "disabled";
 
         return String.format("""
                 {
                   "knowledgeBase": "内部运维文档（CPU高负载/内存高负载/磁盘高负载/服务不可用/响应延迟等）以及用户上传的文档",
                   "defaultTopK": %d,
                   "maxTopK": 20,
-                  "searchModes": ["hybrid_dense_bm25_%s"],
-                  "capabilities": ["keyword_search", "semantic_search", "rerank_%s"],
+                  "searchModes": ["hybrid_dense_bm25_%s", "multi_query_%s"],
+                  "capabilities": ["keyword_search", "semantic_search", "rerank_%s", "multi_query_expansion_%s"],
                   "queryRewriteStrategies": ["prompt_rewrite", "hypothetical_answer", "detail_abstract", "direct"],
                   "activeRewriteStrategy": "%s",
                   "agenticLimits": {
@@ -73,7 +77,7 @@ public class GetSearchCapabilitiesTool {
                     "queryInternalDocs": "简化版检索（一次调用，不拆解）"
                   }
                 }""",
-                defaultTopK, hybridStatus, rerankStatus,
+                defaultTopK, hybridStatus, multiQueryStatus, rerankStatus, multiQueryStatus,
                 rewriteStrategy, maxSearchRounds, minRelevanceScore);
     }
 }

@@ -120,6 +120,23 @@ rag:
     cache:
       enabled: true            # Redis 缓存开关
       ttl-hours: 1             # 缓存过期时间（小时）
+  # 多角度查询召回（可选第三路；全有或全无：开启后任何环节失败直接降级为两路召回）
+  multi-query:
+    enabled: false                  # 可选能力总开关；false = 不启用多角度路，维持两路召回（默认关，灰度开启）
+    max-variants: 5                 # 生成的角度变体数量（不含原始查询），默认 5，可配置
+    model: qwen-turbo               # 变体生成用的轻量 LLM 模型
+    temperature: 0.7                # 生成多样性温度
+    max-tokens: 500                 # 单次生成的 max_tokens
+    timeout-seconds: 15             # LLM 生成整体超时（秒），超时即整路放弃、降级两路
+    variant-recall-count: 10        # 每个变体的检索召回数
+    variant-top-k: 30               # 多角度路内部融合后保留条数（默认对齐 rag.recall-count）
+    variant-search-mode: dense      # 变体检索方式：dense | hybrid
+    variant-rrf-k: 60               # 变体间 RRF 平滑常数
+    weight: 1.0                     # 多角度路在三路 RRF 中的权重
+    angle-prompt: ""                # 角度模板覆盖（留空用内置五类角度模板）
+    cache:
+      enabled: true                 # Redis 缓存开关
+      ttl-hours: 1                  # 缓存过期时间（小时）
   # Agentic RAG 配置（仅对话路径，不影响 AIOps）
   agentic:
     enabled: false                       # 全局开关：true=Agentic RAG, false=传统 RAG
