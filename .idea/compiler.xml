@@ -8,6 +8,7 @@
         <outputRelativeToContentRoot value="true" />
         <processorPath useClasspath="false">
           <entry name="$PROJECT_DIR$/../../environment/apache-maven-3.9.16-bin/apache-maven-3.9.16/repo/org/projectlombok/lombok/1.18.30/lombok-1.18.30.jar" />
+          <entry name="$PROJECT_DIR$/../../environment/apache-maven-3.9.16-bin/apache-maven-3.9.16/repo/org/springframework/boot/spring-boot-configuration-processor/3.2.0/spring-boot-configuration-processor-3.2.0.jar" />
         </processorPath>
         <module name="super-biz-agent" />
       </profile>
