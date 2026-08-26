@@ -1,6 +1,9 @@
 package org.example.config;
 
 import jakarta.annotation.PostConstruct;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -9,6 +12,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * enabled=false（默认）时系统保持现有 DashScope 直连行为；
  * enabled=true 时所有模型调用走 liteLLM OpenAI 兼容网关。
  */
+@Getter
+@Setter
 @ConfigurationProperties(prefix = "litellm")
 public class LiteLlmProperties {
 
@@ -16,6 +21,7 @@ public class LiteLlmProperties {
     private boolean enabled = false;
 
     /** liteLLM 网关地址，如 http://localhost:4000 */
+    @Setter(AccessLevel.NONE)
     private String baseUrl = "http://localhost:4000";
 
     /** liteLLM 虚拟密钥（按业务域分配的 key，需先在网关创建） */
@@ -44,20 +50,13 @@ public class LiteLlmProperties {
         }
     }
 
-    public boolean isEnabled() { return enabled; }
-    public void setEnabled(boolean enabled) { this.enabled = enabled; }
-
-    public String getBaseUrl() { return baseUrl; }
-
     /**
      * 规范化 base-url：去除尾部斜杠，避免拼接端点时出现 "//v1/..."。
+     * （自定义 setter，Lombok 已对该字段关闭自动生成）
      */
     public void setBaseUrl(String baseUrl) {
         this.baseUrl = baseUrl != null && baseUrl.endsWith("/")
                 ? baseUrl.substring(0, baseUrl.length() - 1)
                 : baseUrl;
     }
-
-    public String getApiKey() { return apiKey; }
-    public void setApiKey(String apiKey) { this.apiKey = apiKey; }
 }

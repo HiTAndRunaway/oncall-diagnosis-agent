@@ -1,5 +1,7 @@
 package org.example.config;
 
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
@@ -10,6 +12,8 @@ import java.util.Map;
  * 限流配置属性
  * 前缀：superbiz.rate-limit
  */
+@Getter
+@Setter
 @Configuration
 @ConfigurationProperties("superbiz.rate-limit")
 public class RateLimitConfig {
@@ -26,38 +30,6 @@ public class RateLimitConfig {
     /** 按端点路径设置的限流规则 */
     private Map<String, EndpointLimit> endpoints = new HashMap<>();
 
-    public boolean isEnabled() {
-        return enabled;
-    }
-
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-    }
-
-    public int getDefaultCapacity() {
-        return defaultCapacity;
-    }
-
-    public void setDefaultCapacity(int defaultCapacity) {
-        this.defaultCapacity = defaultCapacity;
-    }
-
-    public int getDefaultRefillRate() {
-        return defaultRefillRate;
-    }
-
-    public void setDefaultRefillRate(int defaultRefillRate) {
-        this.defaultRefillRate = defaultRefillRate;
-    }
-
-    public Map<String, EndpointLimit> getEndpoints() {
-        return endpoints;
-    }
-
-    public void setEndpoints(Map<String, EndpointLimit> endpoints) {
-        this.endpoints = endpoints;
-    }
-
     /**
      * 获取指定路径的限流规则，未配置时返回 null
      */
@@ -68,24 +40,10 @@ public class RateLimitConfig {
     /**
      * 单个端点的限流配置
      */
+    @Getter
+    @Setter
     public static class EndpointLimit {
         private int capacity = 100;
         private int refillRate = 10;
-
-        public int getCapacity() {
-            return capacity;
-        }
-
-        public void setCapacity(int capacity) {
-            this.capacity = capacity;
-        }
-
-        public int getRefillRate() {
-            return refillRate;
-        }
-
-        public void setRefillRate(int refillRate) {
-            this.refillRate = refillRate;
-        }
     }
 }
