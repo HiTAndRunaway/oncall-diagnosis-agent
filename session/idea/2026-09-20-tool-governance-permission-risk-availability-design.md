@@ -9,7 +9,7 @@
 
 | 阶段 | 状态 | 落地位置 |
 |---|---|---|
-| **阶段一 P0：修 `ThreadLocal` 身份传递** | ✅ **已于 2026-09-21 完成** | 分支 `fix/tool-identity-security-context`；新增 `org.example.security.CurrentUser`，`RecallMemoryTool` 改为执行时读取 SecurityContext |
+| **阶段一 P0：修身份越权** | ✅ **已于 2026-09-21 完成** | 分支 `fix/tool-identity-security-context`；新增 `org.example.security.CurrentUser`；`RecallMemoryTool` 与 `ForgetMemoryTool` 改为执行时读取认证上下文 |
 | 阶段二 P1：契约 + 权限 + 审计 | ⬜ 未实现 | — |
 | 阶段三补充 P1.5：修工具描述语义重叠 | ⬜ 未实现 | — |
 | 阶段三 P2：可用性探针 + 风险治理 | ⬜ 未实现 | — |
@@ -17,12 +17,15 @@
 
 阶段一的实现要点与偏离记录：
 
-1. **额外消除了一处重复**：`ChatV1Controller` 与 `MemoryV1Controller` 各有一份完全相同的私有 `getCurrentUserId()`，一并收敛到 `CurrentUser.getId()`。
-2. **额外清理了死代码**：`ChatService` 中注入但从未使用的 `RecallMemoryTool` 字段（Agent 创建逻辑早已迁至 `ReactAgentRunner`）。
-3. **行为差异（有意保留）**：未认证时 `recallMemory` 的错误文案由 `"未设置用户ID"` 改为 `"未认证，无法查询记忆"`，语义更准确。
-4. **`AgenticRagGuard` 的 `ThreadLocal` 未在本次改动范围内**（其轮次计数仍为线程绑定，依赖手动 `reset()`），保留为独立的后续工作项，见第七部分待确认问题。
-5. **验证方式**：全量 70 测试通过；新增 18 个测试；并用**变异测试**（临时把身份改回静态缓存）确认护栏能捕获回归——两个用例如期失败，其中并发用例报出数百例跨用户串号。
-6. **框架侧核实**：确认 Spring AI Alibaba `ReactAgent` 的工具调用经 `ToolCallback` 内联执行、无独立工具派发线程池，故请求线程上的 `SecurityContextHolder` 对工具可用（同步 `/chat` 与 SSE `/chat_stream` 两条路径的 `Flux` 均为同步订阅）。
+1. **范围扩大：顺带修掉一处更严重的同类越权。** 独立代码审查发现 `ForgetMemoryTool.forgetMemory` 把 `userId` 声明为 **LLM 可填的 `@ToolParam`**，并将它直接传给 `memoryManager.deleteMemory(userId, ...)` —— 模型（或经检索文档注入的指令）可指定任意用户，进而**删除他人记忆**。这是攻击者可控的破坏性操作，比原 `ThreadLocal` 问题更严重（原问题最多读到他人身份，这里是可指定）。已移除该参数并改用 `CurrentUser.getRequiredId()`，未认证时拒绝。
+2. **额外消除了一处重复**：`ChatV1Controller` 与 `MemoryV1Controller` 各有一份完全相同的私有 `getCurrentUserId()`，一并收敛到 `CurrentUser.getId()`。
+3. **额外清理了死代码**：`ChatService` 中注入但从未使用的 `RecallMemoryTool` 与 `ForgetMemoryTool` 字段（Agent 创建逻辑早已迁至 `ReactAgentRunner`）。
+4. **行为差异（有意保留，但须注意）**：未认证时 `recallMemory` / `forgetMemory` 由「操作 `"anonymous"` 共享记忆桶」改为**拒绝执行**并返回未认证提示。在默认配置 `superbiz.security.enabled=false` 下不存在已认证身份，因此这两个工具在默认配置下不可用 —— 这是失败安全的取舍，已写入 README 行为变更，若需免认证单用户使用须配置 API Key。
+5. **已知取舍**：用户名字面为 `"anonymous"` 时会被 `isAuthenticated()` 判为未认证而拒绝。已用测试显式锁定该行为。
+6. **`AgenticRagGuard` 的 `ThreadLocal` 未在本次改动范围内**（轮次计数仍为线程绑定，且 `reset()` 只在同步路径 `ReactAgentRunner.execute` 调用、SSE 路径未调用），保留为独立后续工作项。
+7. **验证方式**：全量 **78 测试通过**（新增 26 个）；并用**变异测试**（临时把身份改回静态缓存）确认护栏能捕获回归——两个用例如期失败，其中并发用例报出数百例跨用户串号，证明测试非装饰品。
+8. **框架侧核实（已尽最大可能验证，仍未做运行时验证）**：审查指出框架存在**异步/并行工具派发**路径（`AgentToolNode.executeToolCallsParallel` → `AsyncToolCallbackAdapter.wrapIfNeeded` → `CompletableFuture.supplyAsync(executor)`）。经反编译核对该框架 jar 确认：该路径由 `parallelToolExecution` / `wrapSyncToolsAsAsync` 控制，**`ReactAgent` 未暴露对应 builder 方法、本项目也未启用**，默认内联执行；且框架内**不存在**任何 `SecurityContext` 传播机制（无 `DelegatingSecurityContext*`）。因此当前配置下请求线程上的 `SecurityContextHolder` 对工具可用。
+   > ⚠️ **但这一点未经运行时验证**（需要真实 LLM 调用才能跑通 Agent 工具链路）。若将来启用并行工具执行，或接入异步 MCP 工具，必须同时引入上下文传播，否则工具会退化为匿名并被拒绝。
 
 ---
 

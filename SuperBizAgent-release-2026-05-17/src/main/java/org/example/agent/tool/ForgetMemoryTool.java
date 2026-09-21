@@ -1,6 +1,7 @@
 package org.example.agent.tool;
 
 import org.example.config.MemoryProperties;
+import org.example.security.CurrentUser;
 import org.example.service.MemoryManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,17 +30,22 @@ public class ForgetMemoryTool {
     private MemoryProperties memoryProperties;
 
     @Tool(description = """
-            删除用户的记忆。当用户明确要求"忘记"某些信息时调用。\
-            先按关键词搜索记忆，确认匹配后删除。返回删除结果。""")
+            删除当前用户自己的记忆。当用户明确要求"忘记"某些信息时调用。\
+            先按关键词搜索记忆，确认匹配后删除。返回删除结果。\
+            只能操作当前登录用户自己的记忆，无需也不允许指定用户。""")
     public String forgetMemory(
-            @ToolParam(description = "要删除的记忆关键词，用于搜索匹配的记忆") String target,
-            @ToolParam(description = "当前用户ID") String userId) {
+            @ToolParam(description = "要删除的记忆关键词，用于搜索匹配的记忆") String target) {
+
+        // 身份从认证上下文读取，不接受模型/入参指定，避免越权删除他人记忆
+        String userId;
+        try {
+            userId = CurrentUser.getRequiredId();
+        } catch (IllegalStateException e) {
+            logger.warn("forgetMemory 调用被拒绝：当前无已认证用户身份，target={}", target);
+            return "{\"success\": false, \"message\": \"未认证，无法删除记忆\"}";
+        }
 
         logger.info("Agent 调用 forgetMemory: userId={}, target={}", userId, target);
-
-        if (userId == null || userId.isEmpty()) {
-            return "{\"success\": false, \"message\": \"未设置用户ID\"}";
-        }
 
         // 1. 先搜索匹配的记忆
         List<MemoryManager.MemoryResult> matches =
