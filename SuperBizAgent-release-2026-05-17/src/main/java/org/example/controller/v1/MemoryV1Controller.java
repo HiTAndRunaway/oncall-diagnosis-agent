@@ -3,6 +3,7 @@ package org.example.controller.v1;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.example.dto.ApiResponse;
+import org.example.exception.BizException;
 import org.example.exception.InvalidInputException;
 import org.example.exception.ResourceNotFoundException;
 import org.example.exception.ServiceUnavailableException;
@@ -69,7 +70,8 @@ public class MemoryV1Controller {
     @DeleteMapping("/{memoryId}")
     public ResponseEntity<ApiResponse<Map<String, Object>>> deleteMemory(
             @PathVariable("memoryId") String memoryId) {
-        String userId = CurrentUser.getId();
+        // 变更类操作要求已认证身份，避免未认证调用者操作匿名共享记忆桶
+        String userId = CurrentUser.getRequiredId();
         logger.info("删除记忆 - userId={}, memoryId={}", userId, memoryId);
 
         try {
@@ -84,8 +86,8 @@ public class MemoryV1Controller {
             }
 
             return ResponseEntity.ok(ApiResponse.success(response));
-        } catch (ResourceNotFoundException e) {
-            throw e;
+        } catch (BizException e) {
+            throw e;   // 保留 401/404 等业务语义，不被下面的兜底转成 503
         } catch (Exception e) {
             throw new ServiceUnavailableException("记忆删除", e.getMessage());
         }
@@ -97,7 +99,8 @@ public class MemoryV1Controller {
     @Operation(summary = "清空全部记忆", description = "删除当前用户的所有记忆数据")
     @DeleteMapping("/clear")
     public ResponseEntity<ApiResponse<Map<String, Object>>> clearMemories() {
-        String userId = CurrentUser.getId();
+        // 变更类操作要求已认证身份，避免未认证调用者清空匿名共享记忆桶
+        String userId = CurrentUser.getRequiredId();
         logger.info("清空记忆 - userId={}", userId);
 
         try {
@@ -109,6 +112,8 @@ public class MemoryV1Controller {
             response.put("deletedCount", deleted);
 
             return ResponseEntity.ok(ApiResponse.success(response));
+        } catch (BizException e) {
+            throw e;   // 保留 401 等业务语义，不被下面的兜底转成 503
         } catch (Exception e) {
             throw new ServiceUnavailableException("清空记忆", e.getMessage());
         }

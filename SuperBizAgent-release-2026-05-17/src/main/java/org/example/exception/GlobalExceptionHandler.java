@@ -52,6 +52,23 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 处理缺失认证身份的调用。
+     * <p>
+     * {@code CurrentUser.getRequiredId()} 在无已认证用户时抛出
+     * {@link IllegalStateException}，此处映射为 401 而非兜底的 500，
+     * 避免把「未认证」误报为「服务器内部错误」。
+     */
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingAuthentication(
+            IllegalStateException ex, HttpServletRequest req) {
+        log.warn("[Unauthenticated] path={} message={}", req.getRequestURI(), ex.getMessage());
+        return ResponseEntity.status(401)
+                .body(ApiResponse.<Void>error(401, ex.getMessage())
+                        .withRequestId(MDC.get("requestId"))
+                        .withPath(req.getRequestURI()));
+    }
+
+    /**
      * 兜底处理器，捕获所有未预期的异常。
      * 返回通用错误消息，避免泄露内部细节。
      */

@@ -147,8 +147,8 @@ public class ReactAgentRunner implements AgentRunner {
     @Override
     public String execute(String systemPrompt, String userMessage) {
         ReactAgent agent = buildReactAgent(systemPrompt);
+        agenticRagGuard.reset();
         try {
-            agenticRagGuard.reset();
             log.info("执行 ReactAgent.call() - 自动处理工具调用");
             var response = agent.call(userMessage);
             String answer = response.getText();
@@ -156,6 +156,8 @@ public class ReactAgentRunner implements AgentRunner {
             return answer;
         } catch (Exception e) {
             throw new LlmServiceException("DashScope", "Agent 执行失败: " + e.getMessage());
+        } finally {
+            agenticRagGuard.clear();
         }
     }
 
@@ -165,7 +167,17 @@ public class ReactAgentRunner implements AgentRunner {
      */
     @Override
     public Flux<AgentEvent> executeStream(String systemPrompt, String userMessage) {
-        ReactAgent agent = buildReactAgent(systemPrompt);
+        // 流式路径同样必须重置轮次计数：否则线程池复用时会继承上一次请求的轮次与起始时间。
+        // 注：此处只在构造期（请求线程）重置，未配对调用 clear() —— 流的订阅/回调可能
+        // 落在其他线程，在那里 clear() 会清错线程的状态。
+        agenticRagGuard.reset();
+        ReactAgent agent;
+        try {
+            agent = buildReactAgent(systemPrompt);
+        } catch (Exception e) {
+            log.error("ReactAgent 构建失败", e);
+            return Flux.just(AgentEvent.error(e.getMessage()));
+        }
         return Flux.create(sink -> {
             try {
                 agent.stream(userMessage).subscribe(

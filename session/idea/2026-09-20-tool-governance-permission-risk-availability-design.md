@@ -22,10 +22,12 @@
 3. **额外清理了死代码**：`ChatService` 中注入但从未使用的 `RecallMemoryTool` 与 `ForgetMemoryTool` 字段（Agent 创建逻辑早已迁至 `ReactAgentRunner`）。
 4. **行为差异（有意保留，但须注意）**：未认证时 `recallMemory` / `forgetMemory` 由「操作 `"anonymous"` 共享记忆桶」改为**拒绝执行**并返回未认证提示。在默认配置 `superbiz.security.enabled=false` 下不存在已认证身份，因此这两个工具在默认配置下不可用 —— 这是失败安全的取舍，已写入 README 行为变更，若需免认证单用户使用须配置 API Key。
 5. **已知取舍**：用户名字面为 `"anonymous"` 时会被 `isAuthenticated()` 判为未认证而拒绝。已用测试显式锁定该行为。
-6. **`AgenticRagGuard` 的 `ThreadLocal` 未在本次改动范围内**（轮次计数仍为线程绑定，且 `reset()` 只在同步路径 `ReactAgentRunner.execute` 调用、SSE 路径未调用），保留为独立后续工作项。
-7. **验证方式**：全量 **78 测试通过**（新增 26 个）；并用**变异测试**（临时把身份改回静态缓存）确认护栏能捕获回归——两个用例如期失败，其中并发用例报出数百例跨用户串号，证明测试非装饰品。
+6. **顺带修掉两处同源缺陷（审查报告 #4/#6）**：
+   - `MemoryV1Controller` 的变更类端点（`DELETE /{memoryId}`、`DELETE /clear`）原先也用 `getId()`，未认证时操作 `"anonymous"` 共享记忆桶 —— 默认配置下任何网络客户端都能清空它。现改用 `getRequiredId()`；并新增 `GlobalExceptionHandler` 对 `IllegalStateException` 的 401 映射（原先会落到兜底 500），同时让两个端点的 `catch (Exception)` 不再把 401 吞成 503。
+   - `AgenticRagGuard`：`reset()` 改为在 `ReactAgentRunner.execute` 与 `executeStream` **两条路径**都调用（原先流式路径从不重置，SSE 会继承上一次请求的轮次与起始时间），新增 `clear()` 并在同步路径的 finally 中配对调用。流式路径**故意不调用 `clear()`**：流的订阅/回调可能落在其他线程，在那里清理会清错线程的状态。同步路径另补上 `buildReactAgent` 的异常保护（原先构建失败会抛原始异常而非 `LlmServiceException`）。
+7. **验证方式**：全量 **79 测试通过**；并用**变异测试**（临时把身份改回静态缓存）确认护栏能捕获回归 —— 3 个用例如期失败（含新增的确定性残留用例），证明测试非装饰品。
 8. **框架侧核实（已尽最大可能验证，仍未做运行时验证）**：审查指出框架存在**异步/并行工具派发**路径（`AgentToolNode.executeToolCallsParallel` → `AsyncToolCallbackAdapter.wrapIfNeeded` → `CompletableFuture.supplyAsync(executor)`）。经反编译核对该框架 jar 确认：该路径由 `parallelToolExecution` / `wrapSyncToolsAsAsync` 控制，**`ReactAgent` 未暴露对应 builder 方法、本项目也未启用**，默认内联执行；且框架内**不存在**任何 `SecurityContext` 传播机制（无 `DelegatingSecurityContext*`）。因此当前配置下请求线程上的 `SecurityContextHolder` 对工具可用。
-   > ⚠️ **但这一点未经运行时验证**（需要真实 LLM 调用才能跑通 Agent 工具链路）。若将来启用并行工具执行，或接入异步 MCP 工具，必须同时引入上下文传播，否则工具会退化为匿名并被拒绝。
+   > ⚠️ **但这一点未经运行时验证**（需要真实 LLM 调用才能跑通 Agent 工具链路）。审查建议补一个「通过 Agent/流式路径调用工具」的测试来证实；该测试需要可控的 `ChatModel` 桩（现有测试无此类夹具），尚未实现。若将来启用并行工具执行，或接入异步 MCP 工具，必须同时引入上下文传播，否则工具会退化为匿名并被拒绝。
 
 ---
 

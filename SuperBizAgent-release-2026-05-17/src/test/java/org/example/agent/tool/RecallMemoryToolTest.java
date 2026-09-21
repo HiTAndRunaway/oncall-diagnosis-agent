@@ -194,6 +194,48 @@ class RecallMemoryToolTest {
         }
     }
 
+    /**
+     * 线程池复用场景下「上一个用户残留」的确定性回归用例。
+     * <p>
+     * 这是改造前的真实失效模式：worker 线程先服务 user-a，再服务 user-b 时，
+     * 若身份取自线程绑定的静态缓存且未清理，user-b 的请求会读到 user-a 的身份。
+     * 与并发用例不同，本用例是<b>确定性的</b>：旧实现下必然失败。
+     * <p>
+     * 同时验证 Spring Security 的 {@code SecurityContextHolder} 在 start/end 之间
+     * 会自行清理，因此不存在「跨请求残留」。
+     */
+    @Test
+    void recallMemory_noStaleIdentityFromPreviousUserOnReusedWorker() throws Exception {
+        when(memorySearchService.search(anyString(), anyString(), anyInt()))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            // worker 线程先以 user-a 身份服务一次请求
+            assertEquals("user-a", pool.submit(() -> {
+                authenticate("user-a");
+                return tool.recallMemory("a-query", 3);
+            }).get(10, TimeUnit.SECONDS));
+
+            // 同一 worker 线程随后服务 user-b 的请求，绝不能读到 user-a
+            assertEquals("user-b", pool.submit(() -> {
+                authenticate("user-b");
+                return tool.recallMemory("b-query", 3);
+            }).get(10, TimeUnit.SECONDS),
+                    "同一 worker 线程复用时读到了前一个用户的身份（串号）");
+
+            // 第三次请求：worker 线程未设置身份，必须被拒绝而不是复用 user-b
+            String third = pool.submit(() -> {
+                SecurityContextHolder.clearContext();
+                return tool.recallMemory("c-query", 3);
+            }).get(10, TimeUnit.SECONDS);
+            assertTrue(third.contains("error"),
+                    "未认证请求必须被拒绝，不得复用残留身份，实际: " + third);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
     // ===== 既有行为保持不变 =====
 
     @Test

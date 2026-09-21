@@ -511,11 +511,13 @@ mvn clean compile
   - `RecallMemoryTool` 原先由控制器手工写入静态 `ThreadLocal` 传递 `userId`，在线程池复用、`@Async`、流式线程切换下会读到**其他用户**的身份，导致跨用户记忆泄露。现改为在工具执行时从 `SecurityContextHolder` 实时读取
   - `ForgetMemoryTool` 的 `userId` 原为 **LLM 可填工具参数**，模型（或经检索文档注入的指令）可指定任意用户，进而**删除他人记忆**。现改为从认证上下文读取并移除该参数，未认证时拒绝
 - 🧩 **新增 `CurrentUser` 工具类**: 统一身份读取（`getId` / `isAuthenticated` / `getRequiredId`），消除 `ChatV1Controller` 与 `MemoryV1Controller` 中两份重复的私有 `getCurrentUserId()`
+- 🛡️ **变更类端点要求认证**: `DELETE /api/v1/memory/{id}` 与 `DELETE /api/v1/memory/clear` 改用 `getRequiredId()`，避免未认证调用者操作/清空 `"anonymous"` 共享记忆桶；`GlobalExceptionHandler` 新增未认证的 401 映射（原会落到兜底 500），并修正端点内 `catch (Exception)` 会把 401 吞成 503 的问题
 - 🧹 **清理**: 删除 `ChatV1Controller` 中 6 处 `setCurrentUserId`/`clearCurrentUserId` 调用与 try/finally 清理块、`ChatService` 中两个未使用的工具字段及失效 import
-- ⚠️ **行为变更**: `superbiz.security.enabled=false`（默认配置）下不存在已认证身份，此时 `recallMemory` / `forgetMemory` 将拒绝执行并返回未认证提示。原行为是操作 `"anonymous"` 这一共享记忆桶；若需单用户免认证使用，请配置 API Key 或按需保留该桶语义
-- ✅ **测试**: 新增 `CurrentUserTest`（9 例）+ `RecallMemoryToolTest`（9 例），覆盖已认证/匿名/无上下文/上下文清理四种身份状态、同线程身份重读、线程池复用不残留身份，以及 16 线程 × 200 次并发无串号；已用变异测试验证护栏可捕获回归。全量 70 测试通过
+- 🐛 **修复 SSE 轮次计数继承**: `AgenticRagGuard.reset()` 原先只在同步路径调用，流式（SSE）请求在复用线程时会继承上一次请求的检索轮次与起始时间；现两条路径都重置，并新增 `clear()` 在同步路径 finally 中配对清理
+- ⚠️ **行为变更**: `superbiz.security.enabled=false`（默认配置）下不存在已认证身份，此时 `recallMemory` / `forgetMemory` 及记忆删除接口将拒绝执行并返回未认证提示。原行为是操作 `"anonymous"` 这一共享记忆桶；若需单用户免认证使用，请配置 API Key 或按需保留该桶语义
+- ✅ **测试**: 新增 `CurrentUserTest`（9 例）、`RecallMemoryToolTest`（10 例）、`ForgetMemoryToolTest`（8 例），覆盖已认证/匿名/无上下文/上下文清理四种身份状态、同线程身份重读、**线程池复用不残留前序用户身份**（确定性用例）、16 线程 × 200 次并发无串号、工具签名不再暴露 userId；已用变异测试验证护栏可捕获回归。全量 79 测试通过
 
-> **已知限制（未在本次修复范围内）**: `AgenticRagGuard` 的检索轮次计数仍为线程绑定 `ThreadLocal`，且 `reset()` 只在同步路径调用；会话相关的 `SessionManager` 映射以客户端传入的 sessionId 为键，`/chat/clear` 与 `/chat/session/{id}` 缺少归属校验。详见 `session/idea/2026-09-20-tool-governance-*.md`
+> **已知限制（未在本次修复范围内）**: `/chat/clear` 与 `/chat/session/{id}` 以客户端传入的 sessionId 为键、缺少归属校验；记忆面板查询接口在未认证时仍读取 `"anonymous"` 桶（只读）。详见 `session/idea/2026-09-20-tool-governance-*.md`
 
 ### v1.3.0 (2026-08-24)
 - 🧭 **liteLLM 大模型网关**: 接入 OpenAI 兼容网关（`litellm.enabled` 开关，DashScope 保留为 fallback）

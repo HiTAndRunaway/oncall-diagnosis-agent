@@ -37,12 +37,26 @@ public class AgenticRagGuard {
 
     /**
      * 新一轮对话开始时重置计数器
-     * 应在 ChatService 创建新对话时调用
+     * 应在每次 Agent 执行前调用（同步与流式两条路径都要调用，否则线程池
+     * 复用时会继承上一次请求的轮次与起始时间）
      */
     public void reset() {
         roundCounter.set(0);
         startTime.set(System.currentTimeMillis());
         logger.debug("AgenticRagGuard 已重置");
+    }
+
+    /**
+     * 一轮对话结束后清理线程绑定状态
+     * <p>
+     * 只在 {@link #reset()} 中置 0 并不足够：Servlet 容器会复用请求线程，
+     * 残留的 ThreadLocal 条目会让后续请求读到过期状态。本方法应放在
+     * finally 中调用，与 {@link #reset()} 配对。
+     */
+    public void clear() {
+        roundCounter.remove();
+        startTime.remove();
+        logger.debug("AgenticRagGuard 已清理线程状态");
     }
 
     /**
