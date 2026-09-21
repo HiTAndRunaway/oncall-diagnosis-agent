@@ -6,15 +6,13 @@ import org.example.dto.ApiResponse;
 import org.example.exception.InvalidInputException;
 import org.example.exception.ResourceNotFoundException;
 import org.example.exception.ServiceUnavailableException;
+import org.example.security.CurrentUser;
 import org.example.service.MemoryManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -40,7 +38,7 @@ public class MemoryV1Controller {
     @Operation(summary = "获取记忆面板", description = "按类型分组返回当前用户的所有记忆数据")
     @GetMapping("/panel")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getMemoryPanel() {
-        String userId = getCurrentUserId();
+        String userId = CurrentUser.getId();
         logger.info("获取记忆面板 - userId={}", userId);
 
         if (userId == null || userId.isEmpty()) {
@@ -71,7 +69,7 @@ public class MemoryV1Controller {
     @DeleteMapping("/{memoryId}")
     public ResponseEntity<ApiResponse<Map<String, Object>>> deleteMemory(
             @PathVariable("memoryId") String memoryId) {
-        String userId = getCurrentUserId();
+        String userId = CurrentUser.getId();
         logger.info("删除记忆 - userId={}, memoryId={}", userId, memoryId);
 
         try {
@@ -99,7 +97,7 @@ public class MemoryV1Controller {
     @Operation(summary = "清空全部记忆", description = "删除当前用户的所有记忆数据")
     @DeleteMapping("/clear")
     public ResponseEntity<ApiResponse<Map<String, Object>>> clearMemories() {
-        String userId = getCurrentUserId();
+        String userId = CurrentUser.getId();
         logger.info("清空记忆 - userId={}", userId);
 
         try {
@@ -114,17 +112,6 @@ public class MemoryV1Controller {
         } catch (Exception e) {
             throw new ServiceUnavailableException("清空记忆", e.getMessage());
         }
-    }
-
-    /**
-     * 从 SecurityContext 获取当前用户 ID
-     */
-    private String getCurrentUserId() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.isAuthenticated() && !(auth instanceof AnonymousAuthenticationToken)) {
-            return auth.getName();
-        }
-        return "anonymous";
     }
 
     private List<Map<String, Object>> formatForFrontend(List<MemoryManager.MemoryResult> memories) {

@@ -32,6 +32,7 @@
 
 ### 安全与稳定性
 - ✅ **API Key 认证**: 请求头验证 + SecurityContext 传递 + 匿名用户隔离
+- ✅ **工具身份隔离**: Agent 工具在执行时从 SecurityContext 读取用户身份（`CurrentUser`），不使用可跨线程串号的静态状态
 - ✅ **令牌桶限流**: Bucket4j + Caffeine，按端点独立配置
 - ✅ **断路器保护**: Resilience4j（DashScope LLM / Embedding / Milvus 搜索）
 - ✅ **文件上传加固**: IP 级限流 + 大小校验 + 降级文档重索引
@@ -200,6 +201,7 @@ SuperBizAgent/
 │   │   ├── ApiKeyAuthenticationFilter.java
 │   │   ├── ApiKeyAuthenticationToken.java
 │   │   ├── ApiKeyAuthManager.java
+│   │   ├── CurrentUser.java              # 当前用户身份统一读取（控制器与 Agent 工具共用）🆕
 │   │   └── RateLimitInterceptor.java
 │   ├── config/                           # 配置类
 │   │   ├── ChatModelFactory.java         # 模型统一构建（网关/直连开关收敛点）🆕
@@ -498,11 +500,17 @@ mvn clean compile
 
 ---
 
-**版本**: v1.3.0  
+**版本**: v1.3.1  
 **作者**: chief  
 **许可证**: MIT
 
 ## 📝 更新日志
+
+### v1.3.1 (2026-09-21)
+- 🔐 **修复工具身份串号（越权风险）**: `RecallMemoryTool` 原先由控制器手工写入静态 `ThreadLocal` 传递 `userId`，在线程池复用、`@Async`、流式线程切换下会读到**其他用户**的身份，导致跨用户记忆泄露。现改为在工具执行时从 `SecurityContextHolder` 实时读取，从根因上消除该失效模式
+- 🧩 **新增 `CurrentUser` 工具类**: 统一身份读取（`getId` / `isAuthenticated` / `getRequiredId`），消除 `ChatV1Controller` 与 `MemoryV1Controller` 中两份重复的私有 `getCurrentUserId()`
+- 🧹 **清理**: 删除 `ChatV1Controller` 中 6 处 `setCurrentUserId`/`clearCurrentUserId` 调用与 try/finally 清理块、`ChatService` 中未使用的 `RecallMemoryTool` 字段及失效 import
+- ✅ **测试**: 新增 `CurrentUserTest`（9 例）+ `RecallMemoryToolTest`（9 例），覆盖已认证/匿名/无上下文/上下文清理四种身份状态、同线程身份重读、线程池复用不残留身份，以及 16 线程 × 200 次并发无串号；已用变异测试验证护栏可捕获回归。全量 70 测试通过
 
 ### v1.3.0 (2026-08-24)
 - 🧭 **liteLLM 大模型网关**: 接入 OpenAI 兼容网关（`litellm.enabled` 开关，DashScope 保留为 fallback）

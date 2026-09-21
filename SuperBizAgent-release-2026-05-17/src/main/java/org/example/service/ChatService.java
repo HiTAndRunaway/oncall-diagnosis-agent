@@ -1,7 +1,6 @@
 package org.example.service;
 
 import org.example.agent.tool.ForgetMemoryTool;
-import org.example.agent.tool.RecallMemoryTool;
 import org.example.config.MemoryProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,9 +38,6 @@ public class ChatService {
 
     @Value("${memory.enabled:false}")
     private boolean memoryEnabled;
-
-    @Autowired(required = false)
-    private RecallMemoryTool recallMemoryTool;
 
     @Autowired(required = false)
     private ForgetMemoryTool forgetMemoryTool;

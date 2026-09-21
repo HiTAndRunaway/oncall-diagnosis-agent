@@ -9,7 +9,6 @@ import org.example.agent.AgentRunner;
 import org.example.agent.router.IntentCategory;
 import org.example.agent.router.IntentResult;
 import org.example.agent.router.IntentRouter;
-import org.example.agent.tool.RecallMemoryTool;
 import org.example.dto.AgentEvent;
 import org.example.dto.AiOpsResult;
 import org.example.dto.ApiResponse;
@@ -19,6 +18,7 @@ import org.example.dto.ClearRequest;
 import org.example.dto.SessionInfoResponse;
 import org.example.exception.InvalidInputException;
 import org.example.exception.ResourceNotFoundException;
+import org.example.security.CurrentUser;
 import org.example.service.AiOpsService;
 import org.example.service.ChatService;
 import org.example.service.SessionManager;
@@ -27,9 +27,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -97,43 +94,39 @@ public class ChatV1Controller {
         }
 
         // 从 SecurityContext 获取当前用户 ID
-        String userId = getCurrentUserId();
-        RecallMemoryTool.setCurrentUserId(userId);
-        try {
-            // 获取或创建会话
-            SessionManager.SessionContext ctx = sessionManager.getOrCreateSession(request.getId());
-            String sessionId = ctx.getSessionId();
+        String userId = CurrentUser.getId();
 
-            // 决定使用摘要还是详情
-            List<Map<String, String>> history;
-            if (ctx.hasSummary()) {
-                history = Collections.emptyList();
-            } else {
-                history = ctx.getHistory();
-            }
-            logger.info("会话历史消息对数: {}, 摘要模式: {}", history.size() / 2, ctx.hasSummary());
+        // 获取或创建会话
+        SessionManager.SessionContext ctx = sessionManager.getOrCreateSession(request.getId());
+        String sessionId = ctx.getSessionId();
 
-            // 构建系统提示词
-            String systemPrompt = chatService.buildSystemPrompt(history, ctx.getSummary(), userId);
-
-            // 意图特定的提示词调整
-            if (intent.getCategory() == IntentCategory.UNCLEAR) {
-                systemPrompt += "\n\n如果用户意图不明确，请先友好地引导用户澄清：是遇到了系统告警需要排查，还是想了解相关知识？\n";
-            } else if (intent.getCategory() == IntentCategory.KNOWLEDGE_RETRIEVAL) {
-                systemPrompt += "\n\n用户正在查询内部知识文档，请优先使用 queryInternalDocs 工具检索相关文档后回答。\n";
-            }
-
-            // 通过 AgentRunner 执行对话
-            String fullAnswer = agentRunner.execute(systemPrompt, request.getQuestion());
-
-            // 更新会话历史
-            sessionManager.addMessage(sessionId, request.getQuestion(), fullAnswer, userId);
-            logger.info("已更新会话历史 - SessionId: {}", sessionId);
-
-            return ResponseEntity.ok(ApiResponse.success(ChatResponse.success(fullAnswer, sessionId)));
-        } finally {
-            RecallMemoryTool.clearCurrentUserId();
+        // 决定使用摘要还是详情
+        List<Map<String, String>> history;
+        if (ctx.hasSummary()) {
+            history = Collections.emptyList();
+        } else {
+            history = ctx.getHistory();
         }
+        logger.info("会话历史消息对数: {}, 摘要模式: {}", history.size() / 2, ctx.hasSummary());
+
+        // 构建系统提示词
+        String systemPrompt = chatService.buildSystemPrompt(history, ctx.getSummary(), userId);
+
+        // 意图特定的提示词调整
+        if (intent.getCategory() == IntentCategory.UNCLEAR) {
+            systemPrompt += "\n\n如果用户意图不明确，请先友好地引导用户澄清：是遇到了系统告警需要排查，还是想了解相关知识？\n";
+        } else if (intent.getCategory() == IntentCategory.KNOWLEDGE_RETRIEVAL) {
+            systemPrompt += "\n\n用户正在查询内部知识文档，请优先使用 queryInternalDocs 工具检索相关文档后回答。\n";
+        }
+
+        // 通过 AgentRunner 执行对话
+        String fullAnswer = agentRunner.execute(systemPrompt, request.getQuestion());
+
+        // 更新会话历史
+        sessionManager.addMessage(sessionId, request.getQuestion(), fullAnswer, userId);
+        logger.info("已更新会话历史 - SessionId: {}", sessionId);
+
+        return ResponseEntity.ok(ApiResponse.success(ChatResponse.success(fullAnswer, sessionId)));
     }
 
     /**
@@ -165,8 +158,7 @@ public class ChatV1Controller {
             return emitter;
         }
 
-        String userId = getCurrentUserId();
-        RecallMemoryTool.setCurrentUserId(userId);
+        String userId = CurrentUser.getId();
         try {
             logger.info("收到 Agent 流式对话请求 - SessionId: {}, Question: {}", request.getId(), request.getQuestion());
 
@@ -220,7 +212,6 @@ public class ChatV1Controller {
                         }
                     },
                     error -> {
-                        RecallMemoryTool.clearCurrentUserId();
                         logger.error("Agent 流式对话失败", error);
                         try {
                             emitter.send(SseEmitter.event()
@@ -233,7 +224,6 @@ public class ChatV1Controller {
                     },
                     () -> {
                         try {
-                            RecallMemoryTool.clearCurrentUserId();
                             String fullAnswer = fullAnswerBuilder.toString();
                             logger.info("Agent 流式对话完成 - SessionId: {}, 答案长度: {}",
                                     sessionId, fullAnswer.length());
@@ -252,7 +242,6 @@ public class ChatV1Controller {
                     }
             );
         } catch (Exception e) {
-            RecallMemoryTool.clearCurrentUserId();
             logger.error("Agent 对话初始化失败", e);
             try {
                 emitter.send(SseEmitter.event()
@@ -403,16 +392,5 @@ public class ChatV1Controller {
                 emitter.completeWithError(e);
             }
         });
-    }
-
-    /**
-     * 从 SecurityContext 获取当前用户 ID
-     */
-    private String getCurrentUserId() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.isAuthenticated() && !(auth instanceof AnonymousAuthenticationToken)) {
-            return auth.getName();
-        }
-        return "anonymous";
     }
 }
