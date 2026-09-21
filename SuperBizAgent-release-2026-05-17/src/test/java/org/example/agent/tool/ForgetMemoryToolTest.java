@@ -1,6 +1,7 @@
 package org.example.agent.tool;
 
 import org.example.config.MemoryProperties;
+import org.example.security.CurrentUser;
 import org.example.service.MemoryManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,13 +37,15 @@ class ForgetMemoryToolTest {
 
     private ForgetMemoryTool tool;
     private MemoryManager memoryManager;
+    private MemoryProperties memoryProperties;
 
     @BeforeEach
     void setUp() {
         memoryManager = mock(MemoryManager.class);
+        memoryProperties = new MemoryProperties();   // 默认 requireAuthenticated=true
         tool = new ForgetMemoryTool();
         ReflectionTestUtils.setField(tool, "memoryManager", memoryManager);
-        ReflectionTestUtils.setField(tool, "memoryProperties", new MemoryProperties());
+        ReflectionTestUtils.setField(tool, "memoryProperties", memoryProperties);
     }
 
     @AfterEach
@@ -150,6 +153,29 @@ class ForgetMemoryToolTest {
 
         assertTrue(result.contains("\"success\": false"), "实际: " + result);
         verify(memoryManager, never()).deleteMemory(anyString(), anyString());
+    }
+
+    /**
+     * {@code memory.require-authenticated=false} 时恢复改造前行为：未认证调用操作
+     * {@code "anonymous"} 共享桶（仅单用户开发环境可接受）。
+     */
+    @Test
+    void forgetMemory_requireAuthenticatedDisabled_fallsBackToAnonymousBucket() {
+        memoryProperties.setRequireAuthenticated(false);
+        SecurityContextHolder.clearContext();
+        when(memoryManager.searchSimilarMemories(anyString(), anyString(), anyInt()))
+                .thenReturn(List.of());
+
+        tool.forgetMemory("偏好");
+
+        verify(memoryManager).searchSimilarMemories(
+                eq(CurrentUser.ANONYMOUS), eq("偏好"), eq(3));
+    }
+
+    @Test
+    void requireAuthenticated_defaultIsTrue() {
+        assertTrue(new MemoryProperties().isRequireAuthenticated(),
+                "默认必须要求认证（安全默认值）");
     }
 
     // ===== 下游未命中时的既有行为 =====

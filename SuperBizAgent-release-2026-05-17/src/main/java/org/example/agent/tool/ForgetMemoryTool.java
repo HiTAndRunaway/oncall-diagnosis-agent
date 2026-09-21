@@ -37,10 +37,8 @@ public class ForgetMemoryTool {
             @ToolParam(description = "要删除的记忆关键词，用于搜索匹配的记忆") String target) {
 
         // 身份从认证上下文读取，不接受模型/入参指定，避免越权删除他人记忆
-        String userId;
-        try {
-            userId = CurrentUser.getRequiredId();
-        } catch (IllegalStateException e) {
+        String userId = resolveUserId();
+        if (userId == null) {
             logger.warn("forgetMemory 调用被拒绝：当前无已认证用户身份，target={}", target);
             return "{\"success\": false, \"message\": \"未认证，无法删除记忆\"}";
         }
@@ -68,5 +66,23 @@ public class ForgetMemoryTool {
         return String.format(
             "{\"success\": true, \"message\": \"已删除 %d 条记忆\", \"deletedCount\": %d}",
             deleted, deleted);
+    }
+
+    /**
+     * 解析本次调用应使用的用户身份
+     *
+     * @return 已认证用户 ID；未认证且 {@code memory.require-authenticated=true} 时返回
+     *         null（由调用方拒绝），否则返回 {@link CurrentUser#ANONYMOUS}（改造前的兼容行为）
+     */
+    private String resolveUserId() {
+        if (CurrentUser.isAuthenticated()) {
+            return CurrentUser.getId();
+        }
+        if (memoryProperties != null && !memoryProperties.isRequireAuthenticated()) {
+            logger.warn("memory.require-authenticated=false：forgetMemory 以匿名桶执行，"
+                    + "多用户环境会造成记忆串扰，请勿在生产开启");
+            return CurrentUser.ANONYMOUS;
+        }
+        return null;
     }
 }

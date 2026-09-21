@@ -172,6 +172,8 @@ cls:
 # Mem0 风格长期记忆配置
 memory:
   enabled: true                          # 全局开关：false 时所有记忆功能不注册
+  require-authenticated: true            # 记忆工具是否要求已认证身份：true=未认证拒绝（安全默认）；
+                                         # false=未认证时退化为共享 "anonymous" 桶（仅单用户本地开发可用，多用户会造成记忆串扰）
   extraction:
     trigger-message-count: 6             # 会话新增消息对超过此数触发提取
     model: qwen-turbo                    # 提取 + 冲突判断用的轻量 LLM

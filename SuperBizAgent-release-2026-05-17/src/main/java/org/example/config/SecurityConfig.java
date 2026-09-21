@@ -19,10 +19,16 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 /**
  * Spring Security 配置
  * 安全开关 disabled 时放行所有请求；enabled 时启用 API Key 认证 + 白名单 + 401/403 JSON 响应
+ * <p>
+ * <b>注意：本类整体始终注册，但两条过滤器链按开关二选一。</b>
+ * 早期实现把整个类设为 {@code @ConditionalOnProperty(enabled=true)}，于是关闭状态下
+ * 容器里没有任何 {@code SecurityFilterChain}，Spring Boot 便自动装配其<b>默认安全链</b>
+ * （{@code anyRequest().authenticated()} + 表单登录），所有业务端点被 302 重定向到默认
+ * 登录页 —— 与「放行所有请求」的语义完全相反。此缺陷由
+ * {@code SecurityFilterChainStartupTest} 的启动验证发现。
  */
 @Configuration
 @EnableWebSecurity
-@ConditionalOnProperty(prefix = "superbiz.security", name = "enabled", havingValue = "true")
 public class SecurityConfig {
 
     @Autowired
@@ -34,18 +40,29 @@ public class SecurityConfig {
             "/actuator/health", "/milvus/health", "/favicon.ico"
     };
 
+    /**
+     * 安全开关关闭时的过滤器链：放行所有请求
+     * <p>
+     * 必须显式注册，否则 Spring Boot 的默认安全链会接管并拦截全部请求。
+     */
     @Bean
+    @ConditionalOnProperty(prefix = "superbiz.security", name = "enabled",
+            havingValue = "false", matchIfMissing = true)
+    public SecurityFilterChain permitAllSecurityFilterChain(HttpSecurity http) throws Exception {
+        http
+                .csrf(AbstractHttpConfigurer::disable)
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+        return http.build();
+    }
+
+    /**
+     * 安全开关开启时的过滤器链：API Key 认证
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "superbiz.security", name = "enabled", havingValue = "true")
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
                                                     ApiKeyAuthenticationFilter apiKeyAuthenticationFilter)
             throws Exception {
-        // 安全开关关闭：放行所有请求，禁用 CSRF
-        if (!apiKeyProperties.isEnabled()) {
-            http.authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
-            http.csrf(AbstractHttpConfigurer::disable);
-            return http.build();
-        }
-
-        // 安全开关开启：启用 API Key 认证
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(AbstractHttpConfigurer::disable)

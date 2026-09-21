@@ -18,6 +18,20 @@ public class MemoryProperties {
     /** 全局开关，false 时所有记忆功能不注册 */
     private boolean enabled = true;
 
+    /**
+     * 记忆工具是否要求已认证身份
+     * <p>
+     * <ul>
+     *   <li>{@code true}（默认）：记忆读写工具从认证上下文读取身份，未认证时拒绝执行。
+     *       这是安全默认值 —— 避免未认证调用者落到所有匿名请求共享的 {@code "anonymous"} 桶。</li>
+     *   <li>{@code false}：未认证时退化为使用 {@code "anonymous"} 桶（改造前的行为），
+     *       仅建议在单用户本地开发环境开启；多用户或对外暴露的部署下会造成<b>记忆串扰</b>
+     *       （所有匿名用户读到彼此的记忆）。</li>
+     * </ul>
+     * 注意：本开关只影响 Agent 工具；REST 层的记忆删除接口始终要求认证。
+     */
+    private boolean requireAuthenticated = true;
+
     private Extraction extraction = new Extraction();
     private Search search = new Search();
     private Decay decay = new Decay();

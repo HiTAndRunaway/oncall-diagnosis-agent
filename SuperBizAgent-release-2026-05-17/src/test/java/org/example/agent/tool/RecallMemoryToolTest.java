@@ -1,5 +1,6 @@
 package org.example.agent.tool;
 
+import org.example.config.MemoryProperties;
 import org.example.security.CurrentUser;
 import org.example.service.MemorySearchService;
 import org.junit.jupiter.api.AfterEach;
@@ -40,12 +41,15 @@ class RecallMemoryToolTest {
 
     private RecallMemoryTool tool;
     private MemorySearchService memorySearchService;
+    private MemoryProperties memoryProperties;
 
     @BeforeEach
     void setUp() {
         memorySearchService = mock(MemorySearchService.class);
+        memoryProperties = new MemoryProperties();   // 默认 requireAuthenticated=true
         tool = new RecallMemoryTool();
         ReflectionTestUtils.setField(tool, "memorySearchService", memorySearchService);
+        ReflectionTestUtils.setField(tool, "memoryProperties", memoryProperties);
     }
 
     @AfterEach
@@ -234,6 +238,27 @@ class RecallMemoryToolTest {
         } finally {
             pool.shutdownNow();
         }
+    }
+
+    /**
+     * {@code memory.require-authenticated=false} 时恢复改造前行为：未认证调用落到
+     * 所有匿名请求共享的 {@code "anonymous"} 桶（单用户开发环境可用）。
+     */
+    @Test
+    void recallMemory_requireAuthenticatedDisabled_fallsBackToAnonymousBucket() {
+        memoryProperties.setRequireAuthenticated(false);
+        SecurityContextHolder.clearContext();
+        when(memorySearchService.search(anyString(), anyString(), anyInt())).thenReturn("[]");
+
+        tool.recallMemory("查询", 3);
+
+        verify(memorySearchService).search(eq(CurrentUser.ANONYMOUS), eq("查询"), eq(3));
+    }
+
+    @Test
+    void recallMemory_requireAuthenticatedDefault_isTrue() {
+        assertTrue(memoryProperties.isRequireAuthenticated(),
+                "默认必须要求认证（安全默认值）");
     }
 
     // ===== 既有行为保持不变 =====
